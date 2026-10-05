@@ -1,0 +1,62 @@
+import {spawn} from 'node:child_process';
+import {createRequire} from 'node:module';
+import {readFileSync,mkdirSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import {fileURLToPath} from 'node:url';
+const project=fileURLToPath(new URL('../',import.meta.url));
+process.chdir(project);
+const require=createRequire(import.meta.url);
+const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES?process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright':'playwright');
+const server=spawn('python3',['-u','-m','http.server','8080','--bind','127.0.0.1'],{stdio:['ignore','pipe','pipe']});
+await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>code&&reject(new Error('HTTP server failed')));});
+process.on('exit',()=>server.kill());
+const browser=await chromium.launch({...(process.env.CHROMIUM_EXECUTABLE?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{}),args:['--no-sandbox'],headless:true});
+mkdirSync('test-output',{recursive:true});
+const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block'});
+const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+let privacy=false,role='admin',empty=false,failUpload=false,uploads=[],revoked=false;
+const m={partit_id:'m1',data:'2026-10-10',hora:'10:00',jornada:1,local:'CF VILAJUÏGA',visitant:'Rival de prova',camp_nom:'Camp de prova',camp_adreca:'Adreça de prova',camp_lat:'',camp_lng:'',estat:'pendent',gols_local:'',gols_visitant:'',cronica:'',actualitzat_at:'2026-10-01T10:00:00Z'};
+const photo={foto_id:'00000000-0000-4000-8000-000000000001',partit_id:'m1',peu:'Foto de prova',pujat_per_nom:'Família de prova',pujat_at:'2026-10-01T10:00:00Z',no_mostrar:false,bloquejada:false};
+const b64=readFileSync('assets/football.jpg').toString('base64');
+const bootstrap=()=>({user:{nom:'Família de prova',rol:role,privacyAccepted:privacy},config:{equip_nom:'CF VILAJUÏGA',temporada:'2026/27',privacy_version:'1'},partits:empty?[]:[m],jugadors:[],estadistiques:{PJ:0,V:0,E:0,D:0,GF:0,GC:0,DG:0}});
+await context.route('https://script.google.com/**',async route=>{
+ const p=JSON.parse(route.request().postData()||'{}');let data;if(revoked&&p.action==='bootstrap'){await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:false,error:{code:'UNAUTHORIZED',message:'Sessió revocada de prova'}})});return;}
+ switch(p.action){
+ case 'login':data={token:'synthetic-test-token',expiresAt:'2099-01-01T00:00:00Z',user:bootstrap().user,privacy:{text:'Compromís sintètic de prova.',version:'1'}};break;
+ case 'acceptPrivacy':privacy=true;data={accepted:true};break;
+ case 'bootstrap':data=bootstrap();break;
+ case 'listPhotos':data={fotos:[photo],nextCursor:null};break;
+ case 'getThumbnails':data={items:[{foto_id:photo.foto_id,ok:true,base64:b64}]};break;
+ case 'getPhoto':case 'downloadPhoto':data={base64:b64,filename:'prova.jpg'};break;
+ case 'updateResult':Object.assign(m,{estat:p.estat,gols_local:p.gols_local,gols_visitant:p.gols_visitant,actualitzat_at:'2026-10-06T10:00:00Z'});data={partit:m};break;
+ case 'updateChronicle':m.cronica=p.cronica;data={partit:m};break;
+ case 'uploadPhoto':uploads.push(p);if(failUpload){failUpload=false;await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:false,error:{code:'BUSY',message:'Error de prova'}})});return;}data={foto:photo};break;
+ case 'hidePhoto':photo.no_mostrar=true;photo.bloquejada=true;data={foto:photo};break;
+ case 'showPhoto':photo.no_mostrar=false;photo.bloquejada=false;data={foto:photo};break;
+ case 'deletePhoto':data={deleted:true};break;
+ case 'logout':data={loggedOut:true};break;
+ default:throw new Error('Unexpected action '+p.action);
+ }
+ await route.fulfill({contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify({ok:true,data})});
+});
+await page.goto('http://127.0.0.1:8080/');await page.locator('#login-phone').waitFor();await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:'test-output/login-desktop.png',fullPage:true});
+await page.setViewportSize({width:390,height:844});await page.screenshot({path:'test-output/login-mobile.png',fullPage:true});
+assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile login overflow');
+await page.locator('#login-phone').fill('999000123');await page.locator('#login-form [type=submit]').click();await page.locator('#privacy-form').waitFor();
+assert.equal(await page.evaluate(()=>Object.keys(localStorage).length),0,'token stored before consent');
+await page.locator('[name=accepted]').check();await page.locator('#privacy-form [type=submit]').click();await page.locator('.hero').waitFor();
+await page.screenshot({path:'test-output/home-mobile-test.png',fullPage:true});
+assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile home overflow');
+await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:'test-output/home-desktop-test.png',fullPage:true});
+await page.locator('[data-action=match]').first().click();await page.locator('[data-action=edit-match]').click();await page.selectOption('#match-status','jugat');await page.fill('#gols-local','2');await page.fill('#gols-visitant','1');await page.locator('#edit-form [type=submit]').click();await page.locator('.detail-score').filter({hasText:'2 : 1'}).waitFor();
+await page.locator('[data-action=close]').first().click();await page.locator('.sidebar [data-view=photos]').click();await page.locator('[data-thumb]:visible').waitFor();await page.locator('[data-action=photo]').click();await page.locator('.viewer-media img').waitFor();
+await page.locator('[data-action=download-photo]').click();const downloadPromise=page.waitForEvent('download');await page.locator('[data-action=confirm-download]').click();await downloadPromise;
+await page.locator('[data-action=upload]').first().click();await page.locator('#upload-files').setInputFiles({name:'prova.jpg',mimeType:'image/jpeg',buffer:readFileSync('assets/football.jpg')});failUpload=true;await page.locator('#upload-form [type=submit]').click();await page.locator('[data-action=retry-uploads]').waitFor();await page.locator('[data-action=retry-uploads]').click();await page.locator('.queue-item.done').waitFor();
+assert.equal(uploads.length,2);assert.equal(uploads[0].foto_id,uploads[1].foto_id);assert.equal(uploads[0].request_id,uploads[1].request_id);assert.ok(Buffer.from(uploads[0].photo_base64,'base64').length<=1572864);
+await page.locator('[data-action=close]').first().click();await context.setOffline(true);await page.locator('.offline-banner').waitFor();assert.equal(await page.locator('[data-action=upload]').first().isDisabled(),true);await context.setOffline(false);await page.locator('.offline-banner').waitFor({state:'hidden'});
+await page.locator('[data-action=account]').first().click();await page.locator('[data-action=logout]').click();await page.locator('#login-form').waitFor();assert.equal(await page.evaluate(()=>Object.keys(localStorage).length),0);
+role='familia';await page.locator('#login-phone').fill('999000123');await page.locator('#login-form [type=submit]').click();await page.locator('.hero').waitFor();await page.locator('[data-action=match]').first().click();assert.equal(await page.locator('[data-action=edit-match]').count(),0,'family cannot edit');await page.locator('[data-action=close]').first().click();revoked=true;await page.locator('[data-action=refresh]').click();await page.locator('#login-form').waitFor();assert.equal(await page.evaluate(()=>Object.keys(localStorage).length),0,'revocation clears cached private snapshot');revoked=false;empty=true;await page.locator('#login-phone').fill('999000123');await page.locator('#login-form [type=submit]').click();await page.locator('.hero').waitFor();await page.screenshot({path:'test-output/home-empty-desktop.png',fullPage:true});await page.locator('.sidebar [data-view=calendar]').click();await page.getByText('La temporada ens espera').waitFor();
+assert.deepEqual(errors,[]);
+console.log('PASS: consent, responsive layouts, results, private gallery, download, upload retries, offline, logout, empty season.');
+
+const swContext=await browser.newContext();const swPage=await swContext.newPage();await swPage.goto('http://127.0.0.1:8080/');await swPage.evaluate(()=>navigator.serviceWorker.ready);await swPage.reload();await swContext.setOffline(true);await swPage.reload();await swPage.locator('#login-phone').waitFor();const cacheUrls=await swPage.evaluate(async()=>{const cs=await caches.keys();return (await Promise.all(cs.map(async c=>(await(await caches.open(c)).keys()).map(r=>r.url)))).flat();});assert.ok(cacheUrls.length>=16);assert.ok(cacheUrls.every(u=>u.startsWith('http://127.0.0.1:8080/')));console.log('PASS: installed shell reloads offline; no API or private images in Cache Storage.');server.kill();process.exit(0);

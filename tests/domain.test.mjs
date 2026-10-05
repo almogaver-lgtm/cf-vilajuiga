@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {localNow,nextMatch,result,mapsUrl,filterMatches,icsForMatch,usableSession,esc} from '../domain.mjs';
+const m={partit_id:'m1',data:'2026-10-10',hora:'10:00',local:'CF VILAJUÏGA',visitant:'Rival de prova',estat:'pendent',camp_nom:'Camp de prova'};
+test('Madrid time includes summer and winter offset',()=>{assert.equal(localNow(new Date('2026-10-05T22:10:00Z')),'2026-10-06 00:10');assert.equal(localNow(new Date('2026-12-05T22:10:00Z')),'2026-12-05 23:10');});
+test('next fixture excludes past and postponed fixtures',()=>assert.equal(nextMatch([{...m,partit_id:'old',data:'2026-09-01'},{...m,partit_id:'post',estat:'ajornat'},m],'2026-10-06 00:00').partit_id,'m1'));
+test('result uses home and away scores and rejects incomplete results',()=>{assert.equal(result({...m,estat:'jugat',gols_local:2,gols_visitant:0}).type,'win');assert.equal(result({...m,local:m.visitant,visitant:m.local,estat:'jugat',gols_local:2,gols_visitant:0}).type,'loss');assert.equal(result({...m,estat:'jugat',gols_local:'',gols_visitant:0}),null);});
+test('maps accepts zero coordinates and uses named destination when blank',()=>{assert.match(mapsUrl({...m,camp_lat:0,camp_lng:0}),/destination=0%2C0/);assert.match(mapsUrl({...m,camp_lat:'',camp_lng:''}),/Camp%20de%20prova/);assert.equal(mapsUrl({}),null);});
+test('upcoming filter omits cancelled fixtures',()=>assert.equal(filterMatches([m,{...m,estat:'cancel·lat'}],'upcoming').length,1));
+test('calendar escapes user content and specifies Madrid zone',()=>{const text=icsForMatch({...m,camp_nom:'Camp; prova, A\nB'});assert.match(text,/DTSTART;TZID=Europe\/Madrid:20261010T100000/);assert.ok(text.includes('Camp\\; prova\\, A\\nB'));assert.equal(icsForMatch({...m,hora:''}),null);});
+test('expired sessions cannot restore snapshots',()=>{assert.equal(usableSession({token:'x',cacheKey:'a',expiresAt:'2020-01-01'}),false);assert.equal(usableSession({token:'x',cacheKey:'a',expiresAt:'2099-01-01'}),true);});
+test('user text is safely escaped',()=>assert.equal(esc('<script>"&'), '&lt;script&gt;&quot;&amp;'));
