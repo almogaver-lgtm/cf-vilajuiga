@@ -1,10 +1,10 @@
 {
   "name": "cf-vilajuiga-pwa",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/domain.test.mjs",
+    "test": "node --test tests/domain.test.mjs tests/league.test.mjs",
     "test:browser": "node tests/browser.test.mjs"
   },
   "devDependencies": {

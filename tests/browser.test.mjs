@@ -14,11 +14,13 @@ const browser=await chromium.launch({...(process.env.CHROMIUM_EXECUTABLE?{execut
 mkdirSync('test-output',{recursive:true});
 const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block'});
 const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+let fixtureScenario=false;
+const realCalendar=JSON.parse(readFileSync('tests/fixtures/calendar-2026-27.json','utf8'));
 let privacy=false,role='admin',empty=false,failUpload=false,uploads=[],revoked=false;
 const m={partit_id:'m1',data:'2026-10-10',hora:'10:00',jornada:1,local:'CF VILAJUÏGA',visitant:'Rival de prova',camp_nom:'Camp de prova',camp_adreca:'Adreça de prova',camp_lat:'',camp_lng:'',estat:'pendent',gols_local:'',gols_visitant:'',cronica:'',actualitzat_at:'2026-10-01T10:00:00Z'};
 const photo={foto_id:'00000000-0000-4000-8000-000000000001',partit_id:'m1',peu:'Foto de prova',pujat_per_nom:'Família de prova',pujat_at:'2026-10-01T10:00:00Z',no_mostrar:false,bloquejada:false};
 const b64=readFileSync('assets/football.jpg').toString('base64');
-const bootstrap=()=>({user:{nom:'Família de prova',rol:role,privacyAccepted:privacy},config:{equip_nom:'CF VILAJUÏGA',temporada:'2026/27',privacy_version:'1'},partits:empty?[]:[m],jugadors:[],estadistiques:{PJ:0,V:0,E:0,D:0,GF:0,GC:0,DG:0}});
+const bootstrap=()=>({user:{nom:'Família de prova',rol:role,privacyAccepted:privacy},config:{equip_nom:'CF VILAJUÏGA',temporada:'2026/27',privacy_version:'1'},partits:fixtureScenario?realCalendar:empty?[]:[m],jugadors:[],estadistiques:{PJ:0,V:0,E:0,D:0,GF:0,GC:0,DG:0}});
 await context.route('https://script.google.com/**',async route=>{
  const p=JSON.parse(route.request().postData()||'{}');let data;if(revoked&&p.action==='bootstrap'){await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:false,error:{code:'UNAUTHORIZED',message:'Sessió revocada de prova'}})});return;}
  switch(p.action){
@@ -59,4 +61,20 @@ role='familia';await page.locator('#login-phone').fill('999000123');await page.l
 assert.deepEqual(errors,[]);
 console.log('PASS: consent, responsive layouts, results, private gallery, download, upload retries, offline, logout, empty season.');
 
-const swContext=await browser.newContext();const swPage=await swContext.newPage();await swPage.goto('http://127.0.0.1:8080/');await swPage.evaluate(()=>navigator.serviceWorker.ready);await swPage.reload();await swContext.setOffline(true);await swPage.reload();await swPage.locator('#login-phone').waitFor();const cacheUrls=await swPage.evaluate(async()=>{const cs=await caches.keys();return (await Promise.all(cs.map(async c=>(await(await caches.open(c)).keys()).map(r=>r.url)))).flat();});assert.ok(cacheUrls.length>=16);assert.ok(cacheUrls.every(u=>u.startsWith('http://127.0.0.1:8080/')));console.log('PASS: installed shell reloads offline; no API or private images in Cache Storage.');server.kill();process.exit(0);
+
+fixtureScenario=true;await page.locator('[data-action=refresh]').click();await page.locator('.match-row').nth(6).waitFor();
+assert.equal(await page.locator('.match-row').count(),7,'exactly seven CF Vilajuïga fixtures');
+await page.locator('[data-action=match][data-id="2026_27_f1_j01"]').click();await page.locator('.detail-top').waitFor();assert.ok((await page.locator('.detail-top').textContent()).includes('dissabte, 10 d’octubre'));assert.equal(await page.locator('.detail-info strong').first().innerText(),'10:00');assert.ok((await page.locator('.detail-info').innerText()).includes('Palau-saverdera'));await page.locator('[data-action=close]').click();
+await page.locator('.sidebar [data-view=league]').click();await page.locator('.club-card').nth(7).waitFor();assert.equal(await page.locator('.club-card').count(),8);assert.equal(await page.locator('.our-club').count(),1);
+assert.ok((await page.locator('[data-club=llers] .club-fixture').innerText()).includes('A casa'),'home match distinct from rival home ground');
+assert.ok((await page.locator('[data-club=finca] .club-fixture').innerText()).includes('diumenge, 1 de novembre'));
+const navataMap=await page.locator('[data-club=navata] a').getAttribute('href');assert.equal(navataMap,'https://maps.app.goo.gl/2aj47hjDicsMrnmKA');
+await page.screenshot({path:'test-output/league-desktop.png',fullPage:true});
+await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('.mobile-nav .nav-btn').count(),5);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile league overflow');await page.screenshot({path:'test-output/league-mobile.png',fullPage:true});
+await page.locator('[data-club=finca] [data-action=club]').click();await page.locator('.club-sources').waitFor();assert.ok((await page.locator('.venue-note').innerText()).includes('accés'));await page.screenshot({path:'test-output/club-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'club detail overflow');
+await page.locator('#modal .club-fixture').filter({hasText:'J4'}).click();await page.locator('.detail-top').waitFor();assert.equal(await page.locator('.detail-info strong').first().innerText(),'12:00');assert.ok((await page.locator('.detail-top').textContent()).includes('diumenge, 1 de novembre'));await page.locator('[data-action=close]').click();
+await page.setViewportSize({width:360,height:780});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'360px league overflow');
+await context.setOffline(true);await page.locator('.offline-banner').waitFor();assert.equal(await page.locator('.club-card').count(),8,'league remains available offline');await context.setOffline(false);await page.locator('.offline-banner').waitFor({state:'hidden'});
+assert.deepEqual(errors,[]);console.log('PASS: seven PDF fixtures, home/away ground distinction, league cards, sources, maps, mobile and offline.');
+
+const swContext=await browser.newContext();const swPage=await swContext.newPage();await swPage.goto('http://127.0.0.1:8080/');await swPage.evaluate(()=>navigator.serviceWorker.ready);await swPage.reload();await swContext.setOffline(true);await swPage.reload();await swPage.locator('#login-phone').waitFor();const cacheUrls=await swPage.evaluate(async()=>{const cs=await caches.keys();return (await Promise.all(cs.map(async c=>(await(await caches.open(c)).keys()).map(r=>r.url)))).flat();});assert.ok(cacheUrls.length>=17);assert.ok(cacheUrls.some(u=>u.endsWith('/league.mjs')));assert.ok(cacheUrls.every(u=>u.startsWith('http://127.0.0.1:8080/')));console.log('PASS: installed shell reloads offline; no API or private images in Cache Storage.');server.kill();process.exit(0);

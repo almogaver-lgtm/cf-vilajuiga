@@ -15,7 +15,7 @@ export function result(m,team=TEAM_NAME) {
 }
 export function dateLabel(iso,style='full') {
  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(iso)))return 'Data pendent';
- const options=style==='short'?{day:'numeric',month:'short'}:style==='month'?{month:'long',year:'numeric'}:{weekday:'long',day:'numeric',month:'long'};
+ const options=style==='short'?{day:'numeric',month:'short'}:style==='weekday'?{weekday:'long'}:style==='month'?{month:'long',year:'numeric'}:{weekday:'long',day:'numeric',month:'long'};
  return new Intl.DateTimeFormat('ca-ES',{...options,timeZone:TIME_ZONE}).format(new Date(iso+'T12:00:00Z'));
 }
 export function mapsUrl(m) {

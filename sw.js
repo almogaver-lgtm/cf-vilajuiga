@@ -1,7 +1,7 @@
 const ROOT=new URL('./',self.location.href);
 const PREFIX='cfv-shell-'+ROOT.pathname+':';
-const CACHE=PREFIX+'v3.0.0';
-const SHELL=['./','./index.html','./styles.css','./fonts.css','./app.mjs','./api-client.mjs','./domain.mjs','./config.mjs','./manifest.webmanifest','./assets/app-icon.svg','./assets/icon-192.png','./assets/icon-512.png','./assets/icon-maskable.png','./assets/crest.jpg','./assets/football.jpg','./assets/barlow-condensed-700.ttf'].map(p=>new URL(p,ROOT).href);
+const CACHE=PREFIX+'v3.1.0';
+const SHELL=['./','./index.html','./styles.css','./fonts.css','./app.mjs','./api-client.mjs','./domain.mjs','./league.mjs','./config.mjs','./manifest.webmanifest','./assets/app-icon.svg','./assets/icon-192.png','./assets/icon-512.png','./assets/icon-maskable.png','./assets/crest.jpg','./assets/football.jpg','./assets/barlow-condensed-700.ttf'].map(p=>new URL(p,ROOT).href);
 const ALLOWED=new Set(SHELL);
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith(PREFIX)&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
