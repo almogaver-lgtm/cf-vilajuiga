@@ -1,4 +1,4 @@
-export const API_URL='https://script.google.com/macros/s/AKfycbxqRd6BWzxc75U7JycrInmKP5jFhJ-iflRv8OJtt6oStltsrsoBCxZ-FGGui_vOPXz3/exec';
-export const APP_VERSION='3.2.0';
+export const API_URL='https://script.google.com/macros/s/AKfycbxdiIXIj0RmTmCxG0R6JEdyCrZCtLx4f7bHoGdsSNzaO_J_joLoaKxTEcdkt2cCnjUR/exec';
+export const APP_VERSION='3.2.1';
 export const TEAM_NAME='CF VILAJUÏGA';
 export const TIME_ZONE='Europe/Madrid';

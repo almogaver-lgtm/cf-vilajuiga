@@ -1,6 +1,6 @@
 # CF Vilajuïga · La nostra temporada
 
-PWA en català, versió 3.2.0. Frontend estàtic preparat per a GitHub Pages, connectat al backend Apps Script 2.1.0 (actualització necessària per als cromos) ja instal·lat. No inclou dades personals, contrasenyes ni fotografies privades al repositori.
+PWA en català, versió 3.2.1. Frontend estàtic preparat per a GitHub Pages, connectat al backend Apps Script 2.1.0 (actualització necessària per als cromos) ja instal·lat. No inclou dades personals, contrasenyes ni fotografies privades al repositori.
 
 ## Publicació
 
@@ -58,7 +58,7 @@ Blau i blanc, titulars esportius i navegació inferior al mòbil. La fotografia 
 
 ## Activar els cromos (backend 2.1.0)
 
-El frontend 3.2.0 funciona també amb el backend 2.0.0: mostra els noms i dorsals amb el nou disseny. La foto, la posició i el formulari d’edició s’activen quan Google serveix el backend 2.1.0.
+El frontend 3.2.1 funciona també amb el backend 2.0.0: mostra els noms i dorsals amb el nou disseny. La foto, la posició i el formulari d’edició s’activen quan Google serveix el backend 2.1.0.
 
 1. Al projecte Apps Script existent, substitueix el contingut de `Code.gs` pel de [backend/Code.gs](backend/Code.gs). Guarda’l. El manifest continua sent el mateix.
 2. Executa `installBackend` una vegada. És una actualització sobre les dades existents: afegeix les noves columnes de jugadors, conserva usuaris, partits i configuració, i comprova la carpeta privada `jugadors`.
