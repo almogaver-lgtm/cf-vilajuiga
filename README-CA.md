@@ -1,6 +1,6 @@
 # CF Vilajuïga · La nostra temporada
 
-PWA en català, versió 3.1.0. Frontend estàtic preparat per a GitHub Pages, connectat al backend Apps Script 2.0.0 ja instal·lat. No inclou dades personals, contrasenyes ni fotografies privades al repositori.
+PWA en català, versió 3.2.0. Frontend estàtic preparat per a GitHub Pages, connectat al backend Apps Script 2.1.0 (actualització necessària per als cromos) ja instal·lat. No inclou dades personals, contrasenyes ni fotografies privades al repositori.
 
 ## Publicació
 
@@ -15,6 +15,7 @@ L’enllaç d’Apps Script ja és a `config.mjs`. Si canvies el desplegament, a
 
 - Inici amb proper partit, últim resultat i estadístiques.
 - Calendari amb filtres, detall, crònica, ruta de Google Maps i recordatori `.ics` (durada orientativa de 90 minuts).
+- Equip: àlbum de cromos amb marc platejat, foto, escut, nom, dorsal i posició. L’administrador pot afegir i editar els cromos; la resta de famílies els consulten. Cal activar el backend 2.1.0 per editar i carregar retrats.
 - Lliga: fitxes dels 8 equips de l’Aleví masculí, Fase 1, Grup 1, amb municipi, camp, adreça, ruta i fonts consultades. El partit contra cada rival s’enllaça amb el calendari privat.
 - Galeria privada per partit, visor, descàrrega amb avís i registre, etiquetes de jugadors i pujada de fotografies d’una en una.
 - Compressió local a JPEG, límit de 1.5 MiB, costat màxim 1600 px; miniatures de fins a 480 px i 120 KiB. La reexportació elimina les metadades de la fotografia original.
@@ -54,3 +55,16 @@ Blau i blanc, titulars esportius i navegació inferior al mòbil. La fotografia 
 - Escut: publicat a https://futbol-regional.es/equipo.php?equ=15064, imatge https://futbol-regional.es/media/historico/escudos/17896.jpg. Cal confirmar amb el club que és la versió actual. És una marca del club, no un recurs declarat de domini públic.
 - Icona d’app: monograma V creat per a aquesta interfície.
 - Barlow Condensed: The Barlow Project Authors / Jeremy Tribby. SIL Open Font License 1.1, inclosa a `assets/OFL.txt`; font distribuïda per Google Fonts.
+
+## Activar els cromos (backend 2.1.0)
+
+El frontend 3.2.0 funciona també amb el backend 2.0.0: mostra els noms i dorsals amb el nou disseny. La foto, la posició i el formulari d’edició s’activen quan Google serveix el backend 2.1.0.
+
+1. Al projecte Apps Script existent, substitueix el contingut de `Code.gs` pel de [backend/Code.gs](backend/Code.gs). Guarda’l. El manifest continua sent el mateix.
+2. Executa `installBackend` una vegada. És una actualització sobre les dades existents: afegeix les noves columnes de jugadors, conserva usuaris, partits i configuració, i comprova la carpeta privada `jugadors`.
+3. A **Implementar → Gestionar implementaciones**, edita la implementació actual (llapis), tria **Nueva versión** i prem **Implementar**. Així es conserva la mateixa URL `/exec`.
+4. Tanca totes les pestanyes de l’app i torna-la a obrir. A **Equip** apareixerà **Afegir jugador** per al rol `admin`.
+
+Retrats: es trien al formulari del cromo. L’app els reexporta a JPEG sense metadades, màxim 1200 px i 400 KiB, i els desa a `fotos/jugadors`. No cal publicar Drive, copiar enllaços ni tocar els identificadors interns. Els retrats anteriors substituïts es conserven privats a Drive; l’app només serveix el vigent. Les fotos dels partits es continuen pujant des de Galeria i van a les subcarpetes de cada partit.
+
+A `05_JUGADORS`, els camps que pots omplir manualment són `jugador_id`, `nom`, `dorsal`, `no_mostrar`, `actiu` i `posicio`. Posicions exactes: `Porter`, `Defensa`, `Migcampista`, `Davanter`, o buit. Per crear jugadors manualment cal un ID únic, `actiu=TRUE` i `no_mostrar=FALSE` per als cromos compartits. Els camps des de `foto_id` fins a `ultima_peticio_hash` els gestiona l’app. No afegeixis usuaris ni jugadors de mostra a les dades reals.

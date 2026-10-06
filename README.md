@@ -4,7 +4,7 @@ App de les famílies: partits, resultats, cròniques i fotografies privades, en 
 
 Frontend estàtic preparat per a GitHub Pages. Les dades i fotografies privades es consulten al backend Apps Script amb autenticació; no es publiquen en aquest repositori.
 
-Versió 3.1.0: calendari real de 7 jornades d’anada importat al backend i nova secció Lliga amb els 8 equips, camps, rutes i fonts. Els jugadors s’afegiran més endavant.
+Versió 3.2.0: àlbum de cromos amb nom, dorsal, posició i retrat privat (edició i fotos requereixen actualitzar Apps Script a 2.1.0). També inclou calendari real de 7 jornades d’anada importat al backend i nova secció Lliga amb els 8 equips, camps, rutes i fonts. Els jugadors s’afegiran més endavant.
 
 App publicada: https://almogaver-lgtm.github.io/cf-vilajuiga/
 

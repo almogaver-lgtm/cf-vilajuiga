@@ -1,4 +1,5 @@
 import {API_URL,APP_VERSION,TEAM_NAME} from './config.mjs';
+import {playerCard,POSITIONS} from './player-cards.mjs';
 import {LEAGUE,CLUBS,clubFor,clubMapsUrl} from './league.mjs';
 import {apiPost,requestId,prepareUpload,jpegBlob} from './api-client.mjs';
 import {esc,sortedMatches,nextMatch,lastMatch,opponent,result,dateLabel,mapsUrl,filterMatches,icsForMatch,usableSession} from './domain.mjs';
@@ -13,7 +14,7 @@ function clearStored(){try{Object.keys(localStorage).filter(k=>k.startsWith(PREF
 const stored=read(SESSION_KEY);
 const state={session:usableSession(stored)?stored:null,data:null,view:'home',filter:'all',verified:false,loading:false,error:'',loginBusy:false,
   privacy:null,authUser:null,galleryMatch:'',gallery:[],galleryNext:null,galleryLoading:false,includeHidden:false,thumbs:new Map(),images:new Set(),
-  queue:null,uploading:false,installEvent:null,modalMatch:null,editMode:'result',viewerPhoto:null,viewGeneration:0};
+  queue:null,uploading:false,installEvent:null,modalMatch:null,editMode:'result',viewerPhoto:null,viewGeneration:0,portraits:new Map(),portraitLoads:new Set(),playerDraft:null};
 if(!state.session)clearStored();else state.data=read(PREFIX+'data:'+state.session.cacheKey)?.data||null;
 const paths={home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18m-13 4h2m4 0h2m-8 3h2"/>',photos:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L6 21"/>',team:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m2-17a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5v2"/>',arrow:'<path d="M5 12h14m-6-6 6 6-6 6"/>',chevron:'<path d="m9 5 7 7-7 7"/>',map:'<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="2.5"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',close:'<path d="m6 6 12 12M6 18 18 6"/>',refresh:'<path d="M20 7v5h-5M4 17v-5h5m-4.7-2a8 8 0 0 1 13.2-6L20 7M4 17l2.5 3A8 8 0 0 0 19.7 14"/>',download:'<path d="M12 3v12m-5-5 5 5 5-5M4 15v6h16v-6"/>',upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 16v5h16v-5"/>',edit:'<path d="m16 3 5 5-12 12-6 1 1-6zM13 6l5 5"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15m-9 3v8m4-8v8"/>',logout:'<path d="M9 4H4v16h5m3-8h9m-4-4 4 4-4 4"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/>',ball:'<circle cx="12" cy="12" r="9"/><path d="m12 7 4 3-2 5h-4l-2-5zm0 0V3m4 7 5-1m-7 6 3 5m-7-5-3 5m1-10L3 9"/>',check:'<path d="m5 12 4 4L19 6"/>',phone:'<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/>'};
 const icon=name=>`<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name]||paths.info}</svg>`;
@@ -27,9 +28,9 @@ const team=()=>state.data?.config?.equip_nom||TEAM_NAME;
 const matches=()=>state.data?.partits||[];
 const initials=name=>String(name||'?').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase();
 function toast(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').hidden=true,6500);}
-function forgetImages(){state.viewGeneration++;state.images.forEach(url=>URL.revokeObjectURL(url));state.images.clear();state.thumbs.clear();}
+function forgetImages(){state.viewGeneration++;state.images.forEach(url=>URL.revokeObjectURL(url));state.images.clear();state.thumbs.clear();state.portraits.clear();state.portraitLoads.clear();}
 function imageUrl(base64){const url=URL.createObjectURL(jpegBlob(base64));state.images.add(url);return url;}
-function clearLocal(){forgetImages();clearStored();Object.assign(state,{session:null,data:null,authUser:null,privacy:null,verified:false,queue:null,gallery:[],galleryNext:null,galleryMatch:'',includeHidden:false,viewerPhoto:null,pendingEdit:null,pendingDownload:null,pendingDelete:null,privacyRequest:null,view:'home',filter:'all'});if(modal.open)modal.close();}
+function clearLocal(){forgetImages();clearStored();Object.assign(state,{session:null,data:null,authUser:null,privacy:null,verified:false,queue:null,gallery:[],galleryNext:null,galleryMatch:'',includeHidden:false,viewerPhoto:null,pendingEdit:null,pendingDownload:null,pendingDelete:null,privacyRequest:null,view:'home',filter:'all',playerDraft:null});if(modal.open)modal.close();}
 async function api(payload){
  if(!state.session)throw Object.assign(new Error('Cal iniciar sessió.'),{code:'UNAUTHORIZED'});
  try{return await apiPost(API_URL,{...payload,token:state.session.token,user_agent:navigator.userAgent});}
@@ -47,6 +48,7 @@ function render(){
  <main class="content" id="main">${state.error?`<div class="error-panel" role="alert">${esc(state.error)}</div>`:''}${state.view==='home'?home():state.view==='calendar'?calendar():state.view==='photos'?gallery():state.view==='league'?leagueView():teamView()}</main>
  <nav class="mobile-nav" aria-label="Navegació mòbil">${nav()}</nav></div></div>`;
  if(state.view==='photos')paintThumbs();
+ if(state.view==='team'){paintPortraits();loadPortraits().catch(()=>{});}
 }
 function nav(){return [['home','Inici','home'],['calendar','Partits','calendar'],['photos','Galeria','photos'],['team','Equip','team'],['league','Lliga','ball']].map(([view,label,ico])=>`<button type="button" class="nav-btn ${state.view===view?'active':''}" data-action="navigate" data-view="${view}" ${state.view===view?'aria-current="page"':''}>${icon(ico)}<span>${label}</span></button>`).join('');}
 function renderLogin(){
@@ -102,7 +104,51 @@ function clubDetails(id){
  const club=CLUBS.find(c=>c.id===id);if(!club)return;const m=leagueFixture(club);
  openModal(club.name,`<div class="club-profile"><div class="club-heading">${clubMark(club)}<div><p>${esc(club.town)} · Alt Empordà</p><h3>${esc(club.name)}</h3>${club.own?badge('El nostre equip','win'):badge(LEAGUE.phase)}</div></div><p class="club-description">${esc(club.description)}</p><div class="club-field">${icon('map')}<div><h3>${esc(club.field)}</h3><p>${esc(club.address)}</p></div></div>${club.note?`<p class="venue-note">${esc(club.note)}</p>`:''}<a class="btn" href="${esc(clubMapsUrl(club))}" target="_blank" rel="noopener noreferrer">${icon('map')} Com arribar al seu camp</a>${m?fixtureLink(m):''}<div class="club-sources"><h3>Fonts de la informació</h3><ul>${club.sources.map(source=>`<li><a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">${esc(source.label)} ${icon('arrow')}</a></li>`).join('')}</ul><p>Calendari: Aleví masculí · Fase 1 · Grup 1 · Anada.<br>Consulta de les ubicacions: 6 d’octubre de 2026.</p></div></div>`);
 }
-function teamView(){const players=state.data.jugadors||[];return `${heading('Les persones que el fan possible','El nostre equip','Un grup petit. Una passió ben gran.')}${players.length?`<div class="team-grid">${players.map(j=>`<article class="player-card"><span class="player-number">${j.dorsal===''||j.dorsal==null?'—':esc(j.dorsal)}</span><div><h2>${esc(j.nom)}</h2>${j.no_mostrar?badge('Privacitat','loss'):''}</div></article>`).join('')}</div>`:empty('Un equip per descobrir','Afegirem els noms i els dorsals més endavant. Mentrestant, ja tenim el nostre espai de temporada.','team')}<div class="info-callout">${icon('info')}<p>Només fem servir els noms dels jugadors. Les restriccions de fotografies les gestiona l’administrador.</p></div>`;}
+function teamView(){
+ const players=state.data.jugadors||[],enabled=state.data.features?.player_cards;
+ const add=isAdmin()&&enabled?actionBtn('add-player',icon('team')+' Afegir jugador','btn',canWrite()?'':'disabled'):'';
+ return `${heading('La nostra col·lecció','Els cromos de l’equip','Cada jugador, una part de la nostra història.',add)}<div class="album-heading"><div>${icon('ball')}<span>CF Vilajuïga · ${esc(state.data.config?.temporada||'2026/27')}</span></div><span>${players.length} ${players.length===1?'cromo':'cromos'} · Aleví</span></div>${players.length?`<div class="album-grid">${players.map(j=>`<div class="album-slot"><button class="card-open" type="button" data-action="player" data-id="${esc(j.jugador_id)}" aria-label="Obrir el cromo de ${esc(j.nom)}">${playerCard(j,{season:state.data.config?.temporada})}</button>${isAdmin()&&enabled?actionBtn('edit-player',icon('edit')+' Editar cromo','card-edit',`data-id="${esc(j.jugador_id)}" ${canWrite()?'':'disabled'}`):''}</div>`).join('')}</div>`:`<section class="album-empty"><div class="album-example">${playerCard({nom:'El teu nom',dorsal:'10',posicio:'Migcampista'},{preview:true,season:state.data.config?.temporada})}<small>Mostra del disseny · Dades d’exemple</small></div><div class="album-invitation"><p class="eyebrow">L’àlbum comença aquí</p><h2>Petits jugadors.<br>Grans protagonistes.</h2><p>El nom, el dorsal, la posició i el retrat. La nostra col·lecció, feta amb les persones que fan equip.</p>${add||'<p class="hint">Els cromos s’ompliran quan afegim els jugadors.</p>'}</div></section>`}<div class="info-callout">${icon('lock')}<p>Els retrats es comparteixen només amb les famílies. Les restriccions de fotografies de cada jugador també s’apliquen als cromos.</p></div>`;
+}
+const portraitKey=j=>j.jugador_id+':'+j.retrat_version;
+function paintPortraits(){
+ for(const j of state.data?.jugadors||[]){const key=portraitKey(j);if(!state.portraits.has(key))continue;const url=state.portraits.get(key);
+  document.querySelectorAll(`[data-player-card="${CSS.escape(j.jugador_id)}"]`).forEach(card=>{const image=card.querySelector('[data-portrait]'),fallback=card.querySelector('.card-silhouette');if(url&&image){image.src=url;image.hidden=false;if(fallback)fallback.hidden=true;}else if(fallback){const label=fallback.querySelector('small');if(label)label.textContent='Retrat no disponible';}});
+ }
+}
+async function loadPortraits(){
+ if(!state.data?.features?.player_cards||!state.verified||!navigator.onLine)return;
+ const generation=state.viewGeneration,token=state.session?.token;
+ const list=(state.data.jugadors||[]).filter(j=>j.te_retrat&&!state.portraits.has(portraitKey(j))&&!state.portraitLoads.has(portraitKey(j)));
+ list.forEach(j=>state.portraitLoads.add(portraitKey(j)));
+ for(let i=0;i<list.length;i+=6){const chunk=list.slice(i,i+6);if(state.viewGeneration!==generation||state.session?.token!==token)return;
+  try{const r=await api({action:'getPlayerPortraits',jugador_ids:chunk.map(j=>j.jugador_id),include_hidden:isAdmin()});if(state.viewGeneration!==generation||state.session?.token!==token)return;
+   for(const j of chunk){const item=r.items.find(x=>x.jugador_id===j.jugador_id);state.portraits.set(portraitKey(j),item?.ok&&item.retrat_version===j.retrat_version?imageUrl(item.base64):null);state.portraitLoads.delete(portraitKey(j));}paintPortraits();
+  }catch(e){if(state.viewGeneration!==generation)return;chunk.forEach(j=>{state.portraits.set(portraitKey(j),null);state.portraitLoads.delete(portraitKey(j));});paintPortraits();return;}
+ }
+}
+function playerDetails(id){const j=state.data.jugadors?.find(j=>j.jugador_id===id);if(!j)return;openModal(j.nom,`<div class="player-card-detail">${playerCard(j,{large:true,season:state.data.config?.temporada})}</div>`,isAdmin()&&state.data.features?.player_cards?actionBtn('edit-player',icon('edit')+' Editar cromo','btn',`data-id="${esc(id)}" ${canWrite()?'':'disabled'}`):'','player-dialog');paintPortraits();loadPortraits().catch(()=>{});}
+function playerEditor(id){
+ if(!isAdmin()||!canWrite()||!state.data.features?.player_cards)return;
+ if(state.playerDraft&&state.playerDraft.id!==id){toast('Acaba de guardar el cromo pendent abans d’editar-ne un altre.');return;}
+ const j=state.data.jugadors?.find(j=>j.jugador_id===id)||{nom:'',dorsal:'',posicio:'',actualitzat_at:''};
+ const pending=state.playerDraft?.payload,values=pending||j;
+ openModal(id?'Editar cromo':'Nou cromo',`<form id="player-form" data-id="${esc(id||'')}" data-expected="${esc(pending?.expected_updated_at??j.actualitzat_at??'')}"><div class="form-field"><label for="player-name">Nom</label><input class="input" id="player-name" name="nom" maxlength="60" value="${esc(values.nom)}" placeholder="Nom del jugador" required><p class="hint">Nom de pila, sense cognoms.</p></div><div class="player-form-pair"><div class="form-field"><label for="player-jersey">Dorsal</label><input class="input" id="player-jersey" name="dorsal" type="number" min="0" max="99" step="1" value="${esc(values.dorsal??'')}"></div><div class="form-field"><label for="player-position">Posició</label><select class="input" id="player-position" name="posicio"><option value="">Per definir</option>${POSITIONS.map(p=>`<option ${p===values.posicio?'selected':''}>${p}</option>`).join('')}</select></div></div><div class="form-field"><label for="player-portrait">Retrat ${j.te_retrat?'nou (opcional)':'(opcional)'}</label><input class="input" id="player-portrait" name="retrat" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif"><p class="hint">Pots preparar la foto abans. Format vertical, retrat centrat. L’app la comprimeix i la desa en privat.</p></div><div class="player-live-preview" id="player-live-preview">${playerCard({...j,nom:values.nom||'El teu nom',dorsal:values.dorsal,posicio:values.posicio,te_retrat:false},{preview:true,season:state.data.config?.temporada})}</div>${j.no_mostrar?'<p class="venue-note">Aquest jugador té activada la restricció de fotografies. El cromo continuarà ocult per a les famílies.</p>':''}<p id="player-error" class="error-msg" role="alert" hidden></p><button type="submit" class="btn full">${state.playerDraft?'Reintentar el mateix cromo':'Guardar cromo'}</button></form>`);paintPortraits();
+}
+function updatePlayerPreview(form){if(state.playerDraft)return;const values=new FormData(form);$('player-live-preview').innerHTML=playerCard({nom:String(values.get('nom')||'El teu nom'),dorsal:values.get('dorsal'),posicio:values.get('posicio')},{preview:true,season:state.data.config?.temporada});const file=form.elements.retrat.files[0];if(state.playerPreviewUrl){URL.revokeObjectURL(state.playerPreviewUrl);state.images.delete(state.playerPreviewUrl);state.playerPreviewUrl=null;}if(file){const img=document.createElement('img');img.className='player-portrait';img.alt='Previsualització local del retrat';img.src=imageUrlFromFile(file);state.playerPreviewUrl=img.src;const frame=$('player-live-preview').querySelector('.card-photo');frame.querySelector('.card-silhouette').hidden=true;frame.appendChild(img);}}
+function imageUrlFromFile(file){const url=URL.createObjectURL(file);state.images.add(url);return url;}
+async function savePlayer(form){
+ if(!isAdmin()||!canWrite())return;const token=state.session?.token,values=new FormData(form),button=form.querySelector('[type=submit]');
+ const draft={action:'savePlayer',jugador_id:state.playerDraft?.payload.jugador_id||form.dataset.id||requestId(),nom:String(values.get('nom')||'').trim(),dorsal:values.get('dorsal')===''?'':Number(values.get('dorsal')),posicio:values.get('posicio'),expected_updated_at:form.dataset.expected};
+ const signature=JSON.stringify(draft),file=form.elements.retrat.files[0];
+ if(state.playerDraft&&(state.playerDraft.signature!==signature||file)){ $('player-error').hidden=false;$('player-error').textContent='Hi ha un desament pendent. Reintenta els mateixos valors abans de canviar-los.';return;}
+ state.uploading=true;button.disabled=true;button.textContent='Guardant cromo…';modal.querySelector('[data-action=close]').disabled=true;
+ try{
+  if(!state.playerDraft){const payload={...draft,request_id:requestId()};if(file){const prepared=await prepareUpload(file,{config:{...state.data.config,image_max_dimension:state.data.config.portrait_max_dimension||1200,upload_max_bytes:state.data.config.portrait_max_bytes||409600}});payload.photo_base64=prepared.photo_base64;payload.foto_id=prepared.foto_id;}state.playerDraft={id:form.dataset.id||undefined,signature,payload};}
+  await api(state.playerDraft.payload);if(state.session?.token!==token)return;state.playerDraft=null;state.uploading=false;modal.close();await refresh(false);toast('Cromo guardat a l’àlbum.');
+ }catch(e){if(state.session?.token!==token)return;if(['VALIDATION','FORBIDDEN','CONFLICT'].includes(e.code))state.playerDraft=null;$('player-error').hidden=false;$('player-error').textContent=e.message;button.textContent=state.playerDraft?'Reintentar el mateix cromo':'Guardar cromo';if(state.playerDraft)form.elements.retrat.value='';}
+ finally{state.uploading=false;if(button.isConnected){button.disabled=false;modal.querySelector('[data-action=close]').disabled=false;}}
+}
+
 function openModal(title,body,footer='',className=''){modal.className=className;modal.innerHTML=`<header class="dialog-header"><h2 id="modal-title">${esc(title)}</h2>${actionBtn('close',icon('close'),'icon-btn','aria-label="Tancar"')}</header><div class="dialog-body">${body}</div>${footer?`<footer class="dialog-footer">${footer}</footer>`:''}`;if(!modal.open)modal.showModal();}
 function matchDetails(id){
  const m=matches().find(m=>m.partit_id===id);if(!m)return;state.modalMatch=id;
@@ -133,7 +179,7 @@ async function refresh(show=true){
  if(!state.session||state.privacy||state.loading)return;const sessionToken=state.session.token;state.loading=true;state.error='';if(show)render();
  try{const data=await api({action:'bootstrap'});if(state.session?.token!==sessionToken)return;state.data=data;state.verified=true;cacheData();forgetImages();state.gallery=[];state.galleryNext=null;}
  catch(e){state.verified=false;if(e.code==='PRIVACY_REQUIRED'){clearLocal();state.error='El compromís de privacitat ha canviat. Torna a entrar per llegir-lo.';}else if(e.code!=='UNAUTHORIZED')state.error=state.data?'No s’han pogut obtenir dades noves. Pots consultar l’última versió guardada.':e.message;}
- finally{state.loading=false;render();if(state.view==='photos'&&state.verified)await loadGallery(true);}
+ finally{state.loading=false;render();if(state.view==='photos'&&state.verified)await loadGallery(true);if(state.view==='team'&&state.verified)await loadPortraits();}
 }
 async function login(form){
  const values=new FormData(form),phone=String(values.get('telefon')||'').trim(),code=String(values.get('codi')||'');state.loginBusy=true;state.error='';const btn=form.querySelector('[type=submit]');btn.disabled=true;btn.textContent='Entrant…';
@@ -203,7 +249,7 @@ async function uploadQueue(){
  }
  state.uploading=false;if(state.session?.token===sessionToken){queueDialog();await loadGallery(true);}
 }
-async function navigate(view){if(!['home','calendar','photos','team','league'].includes(view))return;if(state.view==='photos'&&view!=='photos'){forgetImages();state.gallery=[];state.galleryNext=null;}state.view=view;state.error='';render();window.scrollTo({top:0,behavior:'instant'});if(view==='photos')await loadGallery(true);}
+async function navigate(view){if(!['home','calendar','photos','team','league'].includes(view))return;if(['photos','team'].includes(state.view)&&view!==state.view){forgetImages();state.gallery=[];state.galleryNext=null;}state.view=view;state.error='';render();window.scrollTo({top:0,behavior:'instant'});if(view==='photos')await loadGallery(true);}
 function account(){const roleNames={familia:'Família',editor:'Editor',admin:'Administrador'};openModal('El teu espai',`<div class="account-summary"><div class="avatar">${esc(initials(user().nom))}</div><div><h3>${esc(user().nom)}</h3><p>${esc(roleNames[user().rol]||'Família')}</p></div></div><div class="account-links">${actionBtn('install',icon('phone')+' Afegir l’app al mòbil','btn secondary')}${actionBtn('about',icon('info')+' Sobre aquesta app','btn ghost')}${actionBtn('logout',icon('logout')+' Tancar sessió','btn ghost',state.uploading?'disabled':'')}</div><p class="hint" style="margin-top:25px">Versió ${APP_VERSION} · Sessió fins al ${esc(state.session?.expiresAt?dateLabel(state.session.expiresAt.slice(0,10)):'—')}</p>`);}
 function about(){openModal('Futbol, família i poble',`<div class="credits"><p>Aquesta és l’app privada de les famílies del CF Vilajuïga. Calendari, resultats i records de la temporada.</p><p><strong>Privacitat</strong><br>Les fotografies són d’ús familiar. No les publiquis ni les comparteixis fora del grup sense autorització.</p><p><strong>Sense connexió</strong><br>Pots consultar les últimes dades guardades de la temporada mentre la sessió sigui vigent. Les fotos i les edicions necessiten connexió.</p><p><strong>Imatges del disseny</strong><br>Foto ambiental: <a href="https://unsplash.com/photos/soccer-ball-rests-in-the-grass-at-sunset-GTxVeJj1UU0" target="_blank" rel="noopener noreferrer">Nikola Tomašić · Unsplash</a>. No és una fotografia del camp de Vilajuïga.<br>Escut publicat a <a href="https://futbol-regional.es/equipo.php?equ=15064" target="_blank" rel="noopener noreferrer">Fútbol Regional Español</a>; pendent de confirmar amb el club que aquesta és la versió actual. La icona de l’app és un monograma propi.</p><p>Tipografia Barlow Condensed: Jeremy Tribby, SIL Open Font License. Versió ${APP_VERSION}.</p></div>`);}
 async function install(){
@@ -219,6 +265,9 @@ async function action(target){
  if(a==='refresh')return refresh();
  if(a==='match')return matchDetails(id);
  if(a==='club')return clubDetails(id);
+ if(a==='player')return playerDetails(id);
+ if(a==='edit-player')return playerEditor(id);
+ if(a==='add-player')return playerEditor();
  if(a==='match-gallery'){modal.close();state.galleryMatch=id;return navigate('photos');}
  if(a==='edit-match')return editor(id);
  if(a==='edit-tab')return editor(state.modalMatch,target.dataset.mode);
@@ -239,8 +288,9 @@ async function action(target){
  if(a==='add-calendar'){const m=matches().find(m=>m.partit_id===id),ics=m&&icsForMatch(m);if(ics)blobDownload(new Blob([ics],{type:'text/calendar;charset=utf-8'}),'CF-Vilajuiga-'+id+'.ics');}
 }
 document.addEventListener('click',e=>{const target=e.target.closest('[data-action]');if(!target||target.disabled)return;action(target).catch(err=>toast(err.message));});
-document.addEventListener('submit',e=>{const form=e.target;const handler={'login-form':login,'privacy-form':acceptPrivacy,'edit-form':saveEdit,'upload-form':beginUpload}[form.id];if(handler){e.preventDefault();handler(form).catch(err=>toast(err.message));}});
-document.addEventListener('change',e=>{if(e.target.id==='gallery-match'){state.galleryMatch=e.target.value;loadGallery(true);}if(e.target.id==='hidden-photos'){state.includeHidden=e.target.checked;loadGallery(true);}if(e.target.id==='match-status'){const played=e.target.value==='jugat';['gols-local','gols-visitant'].forEach(id=>{const input=$(id);input.disabled=!played;input.required=played;});}});
+document.addEventListener('submit',e=>{const form=e.target;const handler={'login-form':login,'privacy-form':acceptPrivacy,'edit-form':saveEdit,'upload-form':beginUpload,'player-form':savePlayer}[form.id];if(handler){e.preventDefault();handler(form).catch(err=>toast(err.message));}});
+document.addEventListener('input',e=>{if(e.target.closest('#player-form'))updatePlayerPreview(e.target.closest('#player-form'));});
+document.addEventListener('change',e=>{if(e.target.closest('#player-form'))updatePlayerPreview(e.target.closest('#player-form'));if(e.target.id==='gallery-match'){state.galleryMatch=e.target.value;loadGallery(true);}if(e.target.id==='hidden-photos'){state.includeHidden=e.target.checked;loadGallery(true);}if(e.target.id==='match-status'){const played=e.target.value==='jugat';['gols-local','gols-visitant'].forEach(id=>{const input=$(id);input.disabled=!played;input.required=played;});}});
 modal.addEventListener('cancel',e=>{if(state.uploading)e.preventDefault();});
 modal.addEventListener('close',()=>{state.viewerPhoto=null;state.queue=state.uploading?state.queue:null;});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installEvent=e;});

@@ -1,0 +1,9 @@
+import {esc} from './domain.mjs';
+export const POSITIONS=['Porter','Defensa','Migcampista','Davanter'];
+export function cardRole(position){return ({Porter:'GK',Defensa:'DF',Migcampista:'MC',Davanter:'DV'})[position]||'CFV';}
+export function playerCard(j,{season='2026/27',preview=false,large=false}={}){
+ const position=POSITIONS.includes(j.posicio)?j.posicio:'Posició pendent';
+ const jersey=j.dorsal===''||j.dorsal==null?'—':String(j.dorsal);
+ const silhouette='<svg viewBox="0 0 240 300" aria-hidden="true"><circle cx="120" cy="82" r="43"/><path d="M32 282v-83c0-48 39-75 88-75s88 27 88 75v83z"/><path class="shirt-stripe" d="M103 131h34v151h-34z"/></svg>';
+ return `<article class="football-card ${large?'card-large':''} ${preview?'card-preview':''}" data-player-card="${esc(j.jugador_id||'preview')}" aria-label="Cromo de ${esc(j.nom||'Jugador')}" ><div class="card-foil"><div class="card-face"><div class="card-topline"><span>CF VILAJUÏGA</span><b>${esc(season)}</b></div><div class="card-photo"><div class="card-diagonals"></div><div class="card-grain"></div><div class="card-silhouette">${silhouette}<small>${preview?'El teu retrat aquí':j.te_retrat?'Carregant retrat…':'Retrat pendent'}</small></div>${j.te_retrat?`<img class="player-portrait" data-portrait="${esc(j.jugador_id)}" alt="Retrat de ${esc(j.nom)}" hidden>`:''}<img class="card-club-crest" src="./assets/crest.jpg" alt="Escut CF Vilajuïga"><span class="card-jersey"><small>DORSAL</small><b>${esc(jersey)}</b></span><span class="card-role">${cardRole(j.posicio)}</span><span class="card-vertical">FUTBOL · FAMÍLIA · POBLE</span><div class="card-name"><span>${esc(position)}</span><h2>${esc(j.nom||'El teu nom')}</h2></div></div><div class="card-bottomline"><span>ALEVÍ · LA NOSTRA COL·LECCIÓ</span><span>${j.no_mostrar?'PRIVAT':'SOM EQUIP'} <i>✦</i></span></div></div></div></article>`;
+}
