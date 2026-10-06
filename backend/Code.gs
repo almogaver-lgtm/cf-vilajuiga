@@ -1,5 +1,5 @@
-/** CF VILAJUÏGA — FASE 3, Apps Script V8. No secrets in this source. */
-const APP = Object.freeze({version:'2.1.0', portraitLimit:409600, portraitDimension:1200, usersTTL:180, bodyLimit:2400000,
+/** CF VILAJUÏGA — Backend, Apps Script V8. No secrets in this source. */
+const APP = Object.freeze({version:'2.2.0', portraitLimit:409600, portraitDimension:1200, usersTTL:180, bodyLimit:2400000,
   thumbLimit:122880, maxPhotosPerBatch:6, privacyText:
   "Aquesta aplicació és d'ús privat per a les famílies de l'equip i pot contenir fotografies de menors. En accedir-hi et compromets a no publicar ni redistribuir les fotografies fora del grup sense l'autorització corresponent.",
   downloadNotice:"Ús exclusivament privat i familiar. No publiquis aquesta fotografia a xarxes socials ni la comparteixis fora del grup sense autorització."});
@@ -25,6 +25,13 @@ function now_() { return new Date().toISOString(); }
 function props_() { return PropertiesService.getScriptProperties(); }
 function property_(key) { const v=props_().getProperty(key); need_(v,'NOT_CONFIGURED','Falta configurar el backend.'); return v; }
 function json_(data) { return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON); }
+// One snapshot per HTTP request. Never retain permissions, rows or Drive objects across requests.
+let requestContext_ = null;
+function inRequest_(fn) {
+  const previous=requestContext_;
+  requestContext_={spreadsheet:null,sheets:new Map(),rows:new Map(),folders:new Map(),root:null};
+  try { return fn(); } finally { requestContext_=previous; }
+}
 function doGet(e) {
   const a=e && e.parameter && e.parameter.action || 'health';
   if(a==='version') return json_({ok:true,data:{version:APP.version}});
@@ -38,7 +45,7 @@ function doPost(e) {
     need_(e.postData.contents.length<=APP.bodyLimit,'PAYLOAD_TOO_LARGE','Petició massa gran.');
     let p; try { p=JSON.parse(e.postData.contents); } catch(_) { fail_('BAD_JSON','JSON no vàlid.'); }
     need_(p && typeof p==='object' && !Array.isArray(p),'BAD_REQUEST','Petició no vàlida.');
-    return json_({ok:true,data:dispatch_(p)});
+    return json_({ok:true,data:inRequest_(()=>dispatch_(p))});
   } catch(e) {
     // Do not log request bodies, tokens, phone numbers, image data or Google error details.
     return json_({ok:false,error:{code:e.apiCode || 'INTERNAL_ERROR',message:e.apiCode ? e.message : 'Error intern. Torna-ho a provar.'}});
@@ -53,7 +60,10 @@ function dispatch_(p) {
     const c=config_(), a=authenticate_(p.token,c,true);
     if(p.action!=='acceptPrivacy' && p.action!=='logout') privacy_(a,c);
     switch(p.action) {
-      case 'acceptPrivacy': return acceptPrivacy_(p,a,c);
+      case 'acceptPrivacy': {
+        const result=acceptPrivacy_(p,a,c);
+        return p.include_bootstrap===true ? {...result,bootstrap:bootstrap_(p,a,c)} : result;
+      }
       case 'logout': return logout_(p,a,c);
       case 'updateResult': return updateMatch_(p,a,c,false);
       case 'updateChronicle': return updateMatch_(p,a,c,true);
@@ -64,7 +74,8 @@ function dispatch_(p) {
       case 'deletePhoto': return deletePhoto_(p,a,c);
     }
   });
-  const c=config_(), a=authenticate_(p.token,c,p.action!=='bootstrap');
+  // Also recheck users on bootstrap: its player list authorizes reuse of in-memory portraits.
+  const c=config_(), a=authenticate_(p.token,c,true);
   privacy_(a,c);
   if(p.action==='bootstrap') return bootstrap_(p,a,c);
   if(p.action==='listPhotos') return listPhotos_(p,a,c);
@@ -78,18 +89,23 @@ function locked_(fn) {
   try { return fn(); } finally { try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); } }
 }
 function sheet_(name) {
-  const s=SpreadsheetApp.openById(property_('SHEET_ID')).getSheetByName(name);
+  if(requestContext_&&requestContext_.sheets.has(name)) return requestContext_.sheets.get(name);
+  const ss=requestContext_ ? (requestContext_.spreadsheet || (requestContext_.spreadsheet=SpreadsheetApp.openById(property_('SHEET_ID')))) : SpreadsheetApp.openById(property_('SHEET_ID'));
+  const s=ss.getSheetByName(name);
   need_(s,'SCHEMA_ERROR','Falta una pestanya.');
   const h=s.getRange(1,1,1,SCHEMA[name].length).getValues()[0];
   need_(JSON.stringify(h)===JSON.stringify(SCHEMA[name]),'SCHEMA_ERROR','Capçaleres incorrectes a '+name+'.');
+  if(requestContext_) requestContext_.sheets.set(name,s);
   return s;
 }
 function rows_(name) {
+  if(requestContext_&&requestContext_.rows.has(name)) return requestContext_.rows.get(name).map(r=>({...r}));
   const s=sheet_(name), n=s.getLastRow()-1;
-  if(n<=0) return [];
-  return s.getRange(2,1,n,SCHEMA[name].length).getValues().map((r,i)=>{
+  const result=n<=0 ? [] : s.getRange(2,1,n,SCHEMA[name].length).getValues().map((r,i)=>{
     const o={_row:i+2}; SCHEMA[name].forEach((h,j)=>o[h]=r[j]); return o;
   }).filter(o=>String(o[SCHEMA[name][0]]).trim()!=='');
+  if(requestContext_) requestContext_.rows.set(name,result);
+  return result.map(r=>({...r}));
 }
 function unique_(rows,key,value) {
   const hits=rows.filter(r=>String(r[key])===String(value));
@@ -103,6 +119,7 @@ function cell_(v) {
 }
 function put_(name,obj,row) {
   const s=sheet_(name), n=row || s.getLastRow()+1;
+  if(requestContext_) requestContext_.rows.delete(name);
   s.getRange(n,1,1,SCHEMA[name].length).setValues([SCHEMA[name].map(k=>cell_(obj[k]))]);
   SpreadsheetApp.flush(); return n;
 }
@@ -132,12 +149,12 @@ function config_() {
   return c;
 }
 function users_(fresh) {
-  const cache=CacheService.getScriptCache(), key='users-v2';
-  if(!fresh) { const v=cache.get(key); if(v) return JSON.parse(v); }
+  const cache=requestContext_ ? null : CacheService.getScriptCache(), key='users-v2';
+  if(cache&&!fresh) { const v=cache.get(key); if(v) return JSON.parse(v); }
   const rows=rows_('03_USUARIS'), seen={};
   rows.forEach(r=>{ const n=phone_(String(r.telefon)); need_(!seen[n],'SCHEMA_ERROR','Telèfon duplicat.'); seen[n]=true; r.telefon=n;
     need_(['familia','editor','admin'].includes(r.rol),'SCHEMA_ERROR','Rol desconegut.'); });
-  const serialized=JSON.stringify(rows); if(serialized.length<80000) cache.put(key,serialized,APP.usersTTL);
+  if(cache) { const serialized=JSON.stringify(rows); if(serialized.length<80000) cache.put(key,serialized,APP.usersTTL); }
   return rows;
 }
 function invalidateUsers_() { CacheService.getScriptCache().remove('users-v2'); }
@@ -170,7 +187,8 @@ function login_(p) {
   const today=Utilities.formatDate(new Date(),c.timezone,'yyyy-MM-dd');
   if(!rows_('06_REGISTRE').some(r=>r.accio==='LOGIN' && r.telefon===n && r.data_local===today)) audit_('LOGIN',a,c,p,'','',null,null);
   return {token:body+'.'+hmac_(body),expiresAt:new Date(payload.expiresAt).toISOString(),user:userPublic_(u,c),
-    privacy:{version:c.privacy_version,text:APP.privacyText},testMode:c.login_mode==='telefon'};
+    privacy:{version:c.privacy_version,text:APP.privacyText},testMode:c.login_mode==='telefon',
+    ...(p.include_bootstrap===true&&String(u.privacitat_version)===c.privacy_version ? {bootstrap:bootstrap_(p,a,c)} : {})};
 }
 function authenticate_(token,c,fresh) {
   need_(typeof token==='string' && token.length<2048,'UNAUTHORIZED','Cal iniciar sessió.');
@@ -233,7 +251,7 @@ function statistics_(matches,c) {
 }
 function bootstrap_(p,a,c) {
   const matches=rows_('01_PARTITS').filter(m=>bool_(m.visible));
-  return {version:APP.version,features:{player_cards:true},user:userPublic_(a.user,c),config:{equip_nom:c.equip_nom,temporada:c.temporada,timezone:c.timezone,
+  return {version:APP.version,features:{player_cards:true,fresh_permissions:true},user:userPublic_(a.user,c),config:{equip_nom:c.equip_nom,temporada:c.temporada,timezone:c.timezone,
     app_nom:c.app_nom,color_primari:c.color_primari,privacy_version:c.privacy_version,cronica_max_chars:c.cronica_max_chars,
     upload_max_bytes:c.upload_max_bytes,image_max_dimension:c.image_max_dimension,thumbnail_max_dimension:c.thumbnail_max_dimension,
     thumbnail_max_bytes:APP.thumbLimit,portrait_max_bytes:APP.portraitLimit,portrait_max_dimension:APP.portraitDimension,login_mode:c.login_mode},partits:matches.map(matchPublic_),estadistiques:statistics_(matches,c),
@@ -252,8 +270,7 @@ function playerPublic_(j,admin) {
     retrat_version:j.foto_id||'',actualitzat_at:j.actualitzat_at||'',...(admin?{no_mostrar:!safeFalse_(j.no_mostrar)}:{})};
 }
 function playerFolder_(create) {
-  const root=DriveApp.getFolderById(property_('DRIVE_ROOT_FOLDER_ID'));assertPrivate_(root);
-  return singleFolder_(root,'jugadors',create);
+  return singleFolder_(privateRoot_(),'jugadors',create);
 }
 function playerPortraits_(p,a,c) {
   need_(Array.isArray(p.jugador_ids)&&p.jugador_ids.length<=6&&new Set(p.jugador_ids).size===p.jugador_ids.length,'VALIDATION','Màxim sis retrats per petició.');
@@ -266,7 +283,8 @@ function playerPortraits_(p,a,c) {
       need_(folder&&!file.isTrashed()&&file.getMimeType()==='image/jpeg'&&file.getName()===j.jugador_id+'_'+uuid_(j.foto_id)+'.jpg','NOT_FOUND','Retrat no disponible.');
       const parents=file.getParents();let found=false;while(parents.hasNext())if(parents.next().getId()===folder.getId())found=true;
       need_(found&&file.getSize()<=APP.portraitLimit,'NOT_FOUND','Retrat no disponible.');
-      const base64=Utilities.base64Encode(file.getBlob().getBytes());jpeg_(base64,APP.portraitLimit,APP.portraitDimension);
+      const bytes=file.getBlob().getBytes();jpegBytes_(bytes,APP.portraitLimit,APP.portraitDimension);
+      const base64=Utilities.base64Encode(bytes);
       return {ok:true,jugador_id:id,retrat_version:j.foto_id,base64};
     }catch(e){return {ok:false,jugador_id:id,error:{code:e.apiCode||'INTERNAL_ERROR',message:'Retrat no disponible.'}};}
   })};
@@ -421,6 +439,9 @@ function jpeg_(base64,max,maxDimension) {
   need_(typeof base64==='string' && base64.length>0 && base64.length<=4*Math.ceil(max/3) && base64.length%4===0 &&
     /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64),'VALIDATION','JPEG base64 no vàlid.');
   let bytes;try{bytes=Utilities.base64Decode(base64);}catch(_){fail_('VALIDATION','Base64 no vàlid.');}
+  return jpegBytes_(bytes,max,maxDimension);
+}
+function jpegBytes_(bytes,max,maxDimension) {
   need_(bytes.length<=max && bytes.length>=12,'VALIDATION','Mida de JPEG fora del límit.');
   const b=bytes.map(v=>v&255);need_(b[0]===255&&b[1]===216&&b[b.length-2]===255&&b[b.length-1]===217,'VALIDATION','Cal un fitxer JPEG.');
   let i=2,width=0,height=0;
@@ -443,14 +464,22 @@ function assertPrivate_(item) {
   need_(item.getSharingAccess()===DriveApp.Access.PRIVATE && item.getEditors().length===0 && item.getViewers().length===0,
     'DRIVE_NOT_PRIVATE','La carpeta o el fitxer té permisos compartits. Revisa Drive.');
 }
+function privateRoot_() {
+  if(requestContext_&&requestContext_.root) return requestContext_.root;
+  const root=DriveApp.getFolderById(property_('DRIVE_ROOT_FOLDER_ID'));assertPrivate_(root);
+  if(requestContext_) requestContext_.root=root;
+  return root;
+}
 function singleFolder_(parent,name,create) {
+  const key=parent.getId()+'|'+name;
+  if(requestContext_&&requestContext_.folders.has(key)) return requestContext_.folders.get(key);
   const it=parent.getFoldersByName(name);let f=it.hasNext()?it.next():null;
   need_(!it.hasNext(),'SCHEMA_ERROR','Carpeta duplicada.'); if(!f&&create)f=parent.createFolder(name);
-  if(f)assertPrivate_(f);return f;
+  if(f) { assertPrivate_(f); if(requestContext_) requestContext_.folders.set(key,f); }
+  return f;
 }
 function matchFolder_(id,create) {
-  const root=DriveApp.getFolderById(property_('DRIVE_ROOT_FOLDER_ID'));assertPrivate_(root);
-  return singleFolder_(root,id_(id),create);
+  return singleFolder_(privateRoot_(),id_(id),create);
 }
 function uploadPhoto_(p,a,c) {
   const m=match_(p.partit_id,false), fotoId=uuid_(p.foto_id), old=requestLog_(p,a,'UPLOAD_PHOTO');

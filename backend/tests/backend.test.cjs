@@ -8,25 +8,27 @@ const PHONE={admin:'+34600111222',editor:'+34600222333',familia:'+34600333444'};
 const clone=x=>JSON.parse(JSON.stringify(x));
 const iterator=items=>{let i=0;return {hasNext:()=>i<items.length,next:()=>items[i++]};};
 const bytes=b=>[...Buffer.from(b)].map(x=>x>127?x-256:x);
-function setup(){
+function setup(code=source){
   const properties=new Map(),cache=new Map(),sheets=new Map(),files=new Map(),folders=new Map();
+  const metrics={spreadsheetOpens:0,tableReads:{},headerReads:{},folderLookups:0};
+  const resetMetrics=()=>{metrics.spreadsheetOpens=0;metrics.tableReads={};metrics.headerReads={};metrics.folderLookups=0;};
   const failures={deleteIds:new Set(),createAt:0,created:0,writeName:null};
   let locked=false;
   function blob(b,mime='image/jpeg',name=''){const data=typeof b==='string'?Buffer.from(b):Buffer.from(b.map(x=>x&255));return {getBytes:()=>bytes(data),getDataAsString:()=>data.toString(),data,mime,name};}
   function range(sheet,row,col,nr,nc){return {
-    getValues:()=>Array.from({length:nr},(_,i)=>Array.from({length:nc},(_,j)=>sheet.data[row-1+i]?.[col-1+j]??'')),
+    getValues:()=>{const reads=row===1?metrics.headerReads:metrics.tableReads;reads[sheet.name]=(reads[sheet.name]||0)+1;return Array.from({length:nr},(_,i)=>Array.from({length:nc},(_,j)=>sheet.data[row-1+i]?.[col-1+j]??''));},
     setValues:values=>{if(failures.writeName===sheet.name)throw new Error('Injected sheet write failure');values.forEach((r,i)=>{sheet.data[row-1+i]??=[];r.forEach((v,j)=>sheet.data[row-1+i][col-1+j]=typeof v==='string'&&v.startsWith("'")?v.slice(1):v);});return range(sheet,row,col,nr,nc);},
     setBackground(){return this;},setFontColor(){return this;},setFontWeight(){return this;}
   };}
   function sheet(name){const s={name,data:[],getLastRow:()=>s.data.length,getRange:(...args)=>range(s,...args),setFrozenRows(){},setName(n){sheets.delete(s.name);s.name=n;sheets.set(n,s);return s;}};sheets.set(name,s);return s;}
   const ss={getId:()=> 'sheet-id',getUrl:()=> 'https://docs.google.com/spreadsheets/d/sheet-id/edit',getSheetByName:n=>sheets.get(n),insertSheet:sheet,getSheets:()=>[...sheets.values()],setSpreadsheetTimeZone(){}};
   function file(id,name,folder,b){const f={id,name,folder,b,shared:false,editors:[],viewers:[],trashed:false,getId:()=>id,getName:()=>f.name,getMimeType:()=>f.mime||'image/jpeg',getSharingAccess:()=>f.shared?'ANYONE':'PRIVATE',getEditors:()=>f.editors,getViewers:()=>f.viewers,isTrashed:()=>f.trashed,getParents:()=>iterator(folder?[folder]:[]),getSize:()=>f.b.length,getBlob:()=>blob(f.b)};files.set(id,f);return f;}
-  function folder(name,parent){const id=crypto.randomUUID();const f={name,id,parent,shared:false,getId:()=>id,getUrl:()=> 'https://drive.google.com/drive/folders/'+id,getSharingAccess:()=>f.shared?'ANYONE':'PRIVATE',getEditors:()=>[],getViewers:()=>[],getFoldersByName:n=>iterator([...folders.values()].filter(x=>x.parent===f&&x.name===n)),createFolder:n=>folder(n,f),getFilesByName:n=>iterator([...files.values()].filter(x=>x.folder===f&&x.name===n)),getFiles:()=>iterator([...files.values()].filter(x=>x.folder===f)),createFile:b=>{failures.created++;if(failures.createAt===failures.created)throw new Error('Injected Drive create failure');return file(crypto.randomUUID(),b.name,f,b.data);}};folders.set(id,f);return f;}
+  function folder(name,parent){const id=crypto.randomUUID();const f={name,id,parent,shared:false,getId:()=>id,getUrl:()=> 'https://drive.google.com/drive/folders/'+id,getSharingAccess:()=>f.shared?'ANYONE':'PRIVATE',getEditors:()=>[],getViewers:()=>[],getFoldersByName:n=>{metrics.folderLookups++;return iterator([...folders.values()].filter(x=>x.parent===f&&x.name===n));},createFolder:n=>folder(n,f),getFilesByName:n=>iterator([...files.values()].filter(x=>x.folder===f&&x.name===n)),getFiles:()=>iterator([...files.values()].filter(x=>x.folder===f)),createFile:b=>{failures.created++;if(failures.createAt===failures.created)throw new Error('Injected Drive create failure');return file(crypto.randomUUID(),b.name,f,b.data);}};folders.set(id,f);return f;}
   const ctx=vm.createContext({console:{log(){}},Date,Set,JSON,Math,Object,String,Number,Array,Error,
     PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties.get(k)||null,setProperty:(k,v)=>properties.set(k,v),deleteProperty:k=>properties.delete(k),getProperties:()=>Object.fromEntries(properties)})},
     CacheService:{getScriptCache:()=>({get:k=>cache.get(k)||null,put:(k,v)=>cache.set(k,v),remove:k=>cache.delete(k)})},
     LockService:{getScriptLock:()=>({tryLock:()=>{assert.equal(locked,false);locked=true;return true;},releaseLock:()=>{locked=false;}})},
-    SpreadsheetApp:{openById:()=>ss,create:()=>{sheet('Sheet1');const f=file('sheet-id','Spreadsheet',null,Buffer.alloc(0));f.mime='application/vnd.google-apps.spreadsheet';return ss;},flush(){}},
+    SpreadsheetApp:{openById:()=>{metrics.spreadsheetOpens++;return ss;},create:()=>{sheet('Sheet1');const f=file('sheet-id','Spreadsheet',null,Buffer.alloc(0));f.mime='application/vnd.google-apps.spreadsheet';return ss;},flush(){}},
     DriveApp:{Access:{PRIVATE:'PRIVATE'},createFolder:n=>folder(n,null),getFolderById:id=>{if(!folders.has(id))throw Error('Missing folder');return folders.get(id);},getFileById:id=>{if(!files.has(id))throw Error('Missing file');return files.get(id);}},
     Drive:{Files:{remove:id=>{if(failures.deleteIds.has(id))throw Error('Injected Drive delete failure');assert(files.has(id));files.delete(id);}}},
     ContentService:{MimeType:{JSON:'application/json'},createTextOutput:s=>({text:s,setMimeType(){return this;}})},
@@ -37,7 +39,7 @@ function setup(){
       formatDate:(d,tz,fmt)=>{assert.equal(fmt,'yyyy-MM-dd');return new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).format(d);},
       parseCsv:text=>text.trim().split('\n').map(r=>r.split(','))
     }
-  });vm.runInContext(source,ctx);ctx.installBackend();
+  });vm.runInContext(code,ctx);ctx.installBackend();
   for(const [role,n] of Object.entries(PHONE))ctx.addUser(n,role,role);
   const config=(k,v)=>{const r=ctx.unique_(ctx.rows_('02_CONFIG'),'clau',k);r.valor=v;ctx.put_('02_CONFIG',r,r._row);};
   const call=p=>clone(JSON.parse(ctx.doPost({postData:{contents:JSON.stringify(p)}}).text));
@@ -51,7 +53,7 @@ function setup(){
   const jpeg=Buffer.from([255,216,255,192,0,11,8,0,1,0,1,1,1,17,0,255,218,0,8,1,1,0,0,63,0,1,255,217]).toString('base64');
   const upload=(token,extra={})=>req('uploadPhoto',token,{foto_id:crypto.randomUUID(),partit_id:'P001',photo_base64:jpeg,thumb_base64:jpeg,jugadors_ids:['J01'],peu:'',...extra});
   const setUser=(role,values)=>{const u=ctx.unique_(ctx.users_(true),'telefon',PHONE[role]);Object.assign(u,values);ctx.put_('03_USUARIS',u,u._row);ctx.invalidateUsers_();};
-  return {ctx,call,req,login,accept,session,upload,config,properties,cache,sheets,files,folders,failures,setUser,jpeg};
+  return {ctx,call,req,login,accept,session,upload,config,properties,cache,sheets,files,folders,failures,setUser,jpeg,metrics,resetMetrics};
 }
 const tests=[];function test(name,fn){tests.push([name,fn]);}function error(r,code){assert.equal(r.ok,false);assert.equal(r.error.code,code);}
 test('installation is repeatable, six tables, no fake users or fixtures added by installer',()=>{const t=setup();t.ctx.installBackend();assert.equal(t.sheets.size,6);assert.equal(t.ctx.rows_('03_USUARIS').length,3);assert.equal(t.ctx.rows_('01_PARTITS').length,1);});
@@ -93,5 +95,56 @@ test('portrait ID, folder, file name and sharing are verified on every read',()=
 test('player save retries recover failed audit without duplicating portrait, reject altered request',()=>{const t=setup(),admin=t.session(),request_id=crypto.randomUUID(),p=playerPayload(t,{request_id,photo_base64:t.jpeg,foto_id:crypto.randomUUID()});t.failures.writeName='06_REGISTRE';error(t.req('savePlayer',admin,p),'INTERNAL_ERROR');const files=t.files.size;t.failures.writeName=null;assert(t.req('savePlayer',admin,p).data.replayed);assert.equal(t.files.size,files);error(t.req('savePlayer',admin,{...p,nom:'Changed'}),'CONFLICT');assert.equal(t.ctx.rows_('06_REGISTRE').filter(x=>x.accio==='SAVE_PLAYER').length,1);error(t.req('savePlayer',admin,playerPayload(t)),'CONFLICT');});
 test('failed player row write cleans newly created portrait; original player is intact',()=>{const t=setup(),admin=t.session(),files=t.files.size;t.failures.writeName='05_JUGADORS';error(t.req('savePlayer',admin,playerPayload(t,{photo_base64:t.jpeg,foto_id:crypto.randomUUID()})),'INTERNAL_ERROR');assert.equal(t.files.size,files);assert.equal(t.ctx.rows_('05_JUGADORS')[0].nom,'Prova');});
 test('new player card gets active flag and escaped formula-safe name; invalid fields rejected',()=>{const t=setup(),admin=t.session();error(t.req('savePlayer',admin,playerPayload(t,{dorsal:100})),'VALIDATION');error(t.req('savePlayer',admin,playerPayload(t,{posicio:'Unknown'})),'VALIDATION');error(t.req('savePlayer',admin,playerPayload(t,{photo_base64:'bad',foto_id:crypto.randomUUID()})),'VALIDATION');const r=t.req('savePlayer',admin,playerPayload(t,{jugador_id:'J02',nom:'=PROVA',dorsal:''}));assert(r.ok);assert.equal(t.ctx.rows_('05_JUGADORS')[1].nom,'=PROVA');assert.equal(t.ctx.rows_('05_JUGADORS')[1].actiu,true);});
+test('six thumbnails read each table once and reuse the validated parent folder',()=>{
+  const t=setup(),token=t.session('familia'),ids=Array.from({length:6},()=>t.upload(token).data.foto.foto_id);
+  t.resetMetrics();const result=t.req('getThumbnails',token,{foto_ids:ids});
+  assert(result.ok);assert.equal(result.data.items.filter(x=>x.ok).length,6);
+  assert.equal(t.metrics.spreadsheetOpens,1);
+  assert(Object.values(t.metrics.tableReads).every(n=>n===1));
+  assert(Object.values(t.metrics.headerReads).every(n=>n===1));assert.equal(t.metrics.folderLookups,1);
+  // A later request must see manual restrictions, changed sharing and changed headers.
+  const j=t.ctx.rows_('05_JUGADORS')[0];j.no_mostrar=true;t.ctx.put_('05_JUGADORS',j,j._row);
+  assert(t.req('getThumbnails',token,{foto_ids:ids}).data.items.every(x=>!x.ok));
+  j.no_mostrar=false;t.ctx.put_('05_JUGADORS',j,j._row);
+  const f=t.ctx.rows_('04_FOTOS')[0],folder=t.files.get(f.thumb_file_id).folder;folder.shared=true;
+  assert(t.req('getThumbnails',token,{foto_ids:ids}).data.items.every(x=>!x.ok));folder.shared=false;
+  t.sheets.get('04_FOTOS').data[0][0]='incorrect';
+  assert(t.req('getThumbnails',token,{foto_ids:ids}).data.items.every(x=>!x.ok));
+});
+test('combined login and consent bootstrap never expose data before current acceptance',()=>{
+  const t=setup(),r=t.call({action:'login',telefon:PHONE.admin,include_bootstrap:true});
+  assert(r.ok);assert.equal(r.data.bootstrap,undefined);
+  const token=r.data.token,request_id=crypto.randomUUID();
+  error(t.req('acceptPrivacy',token,{accepted:true,version:'0',include_bootstrap:true}),'VALIDATION');
+  const accepted=t.req('acceptPrivacy',token,{request_id,accepted:true,version:'1',include_bootstrap:true});
+  assert(accepted.data.bootstrap.features.fresh_permissions);assert.equal(accepted.data.bootstrap.partits.length,1);
+  const retry=t.req('acceptPrivacy',token,{request_id,accepted:true,version:'1',include_bootstrap:true});assert(retry.data.bootstrap.user.privacyAccepted);
+  assert.equal(t.ctx.rows_('06_REGISTRE').filter(x=>x.accio==='ACCEPT_PRIVACY').length,1);
+  const next=t.call({action:'login',telefon:PHONE.admin,include_bootstrap:true});assert(next.data.bootstrap.user.privacyAccepted);
+  assert.equal(t.login().data.bootstrap,undefined,'old clients retain the original response');
+  t.config('privacy_version','2');assert.equal(t.call({action:'login',telefon:PHONE.admin,include_bootstrap:true}).data.bootstrap,undefined);
+});
+test('bootstrap does not reuse a previous user cache after manual role or activation changes',()=>{
+  const t=setup(),token=t.session();assert(t.req('bootstrap',token).data.features.fresh_permissions);
+  // Simulate direct Sheet editing without calling invalidateUsers_.
+  const s=t.sheets.get('03_USUARIS');s.data[1][2]='familia';
+  assert.equal(t.req('bootstrap',token).data.user.rol,'familia');
+  s.data[1][4]=false;error(t.req('bootstrap',token),'UNAUTHORIZED');
+});
+test('request snapshots isolate unsaved edits, reflect writes, and are discarded after failure',()=>{
+  const t=setup();
+  t.ctx.inRequest_(()=>{
+    const j=t.ctx.rows_('05_JUGADORS')[0];j.nom='Unsaved';
+    assert.equal(t.ctx.rows_('05_JUGADORS')[0].nom,'Prova');
+    t.ctx.put_('05_JUGADORS',j,j._row);assert.equal(t.ctx.rows_('05_JUGADORS')[0].nom,'Unsaved');
+  });
+  assert.throws(()=>t.ctx.inRequest_(()=>{t.ctx.rows_('05_JUGADORS');throw Error('Injected');}));
+  t.sheets.get('05_JUGADORS').data[1][1]='Manual change';
+  assert.equal(t.ctx.rows_('05_JUGADORS')[0].nom,'Manual change');
+});
+module.exports={setup,PHONE};
+if(require.main===module){
 let passed=0;for(const [name,fn]of tests){try{fn();console.log('PASS '+name);passed++;}catch(e){console.error('FAIL '+name+'\n'+e.stack);process.exitCode=1;}}
 console.log(`${passed}/${tests.length} passed`);
+
+}

@@ -1,6 +1,6 @@
 # CF VILAJUÏGA · FASE 2 · Backend Apps Script
 
-Versió 2.1.0 · 6 d’octubre de 2026.
+Versió 2.2.0 · 6 d’octubre de 2026.
 
 Backend instal·lable per al teu compte **almogaver@gmail.com**, amb login inicial per telèfon, preparat per passar a telèfon + codi. No hi ha cap secret ni telèfon real dins d’aquest paquet.
 
@@ -161,8 +161,8 @@ Sheets, Script Properties i Drive no formen una transacció única. Consentiment
 
 - Token HMAC-SHA256 amb telèfon, inici, caducitat, UUID de sessió i vincle amb el mode/codi actuals. No es desa cap taula de sessions al Sheet.
 - Vigència màxima 30 dies. El rol s’obté de l’usuari actual, no d’un rol dins del token.
-- Bootstrap pot reutilitzar usuaris durant 180 segons. Fotos i escriptures sempre llegeixen usuaris actuals; configuració i restriccions de jugadors no usen aquest cache.
-- Un canvi manual de `actiu`, rol o usuari pot tardar fins a tres minuts a afectar bootstrap. Invalida cache des de l’editor si vols aplicar-lo immediatament. Les peticions de fotos i escriptures ja el comproven sense cache.
+- Totes les peticions HTTP, inclòs bootstrap, llegeixen usuaris actuals. Les lectures repetides dins de la mateixa petició comparteixen una instantània; no es guarda entre peticions.
+- Un canvi manual de `actiu`, rol o usuari s’aplica a la següent petició HTTP. El cache orientatiu d’usuaris només es conserva per a funcions locals de l’editor; no autoritza l’API.
 - Per deixar sense efecte totes les sessions, substitueix `SESSION_SECRET` per un secret nou al projecte. Això també invalida els HMAC dels codis; caldrà tornar a assignar-los. No reutilitzis el secret al frontend.
 - Script Properties també conté `DRIVE_APP_FOLDER_ID`, revocacions `revoked:*` i registres temporals `pendingMatch:*`, a més de les propietats principals. Són necessaris per repetir instal·lació, fer logout efectiu i recuperar escriptures.
 - Limitació d’intents per telèfon: 5 en 15 minuts; global: 100 per minut. És una protecció orientativa amb CacheService, que pot expulsar entrades abans del TTL. Apps Script no proporciona la IP a aquest `doPost`; no es promet una defensa forta contra força bruta o denegació de servei.
@@ -176,10 +176,10 @@ Executa des de la carpeta del paquet amb Node.js:
 
 ```bash
 node tests/backend.test.cjs
-node tests/client.test.mjs
+
 ```
 
-Resultat: **30/30 servidor + 5/5 client**. Cobreixen instal·lació repetible, consentiment, tokens manipulats i caducats, revocació, canvi de mode/codi, rols, conflictes, estadístiques, privacitat de fotos/jugadors, validació JPEG, pujades repetides, errors de Drive i Sheet, recuperació d’auditoria, eliminació parcial i transport. El CSV es prova amb un doble simplificat; la sintaxi real de camps entre cometes depèn del parser oficial de Google.
+Resultat: **41/41 servidor**. Cobreixen instal·lació repetible, consentiment, tokens manipulats i caducats, revocació, canvi de mode/codi, rols, conflictes, estadístiques, privacitat de fotos/jugadors, validació JPEG, pujades repetides, errors de Drive i Sheet, recuperació d’auditoria, eliminació parcial i transport. El CSV es prova amb un doble simplificat; la sintaxi real de camps entre cometes depèn del parser oficial de Google.
 
 Aquestes proves no mesuren temps de resposta real, quotes, CORS del desplegament, autorització Google, compatibilitat real de canvas ni comportament de permisos heretats a Drive. Cal provar-los després d’instal·lar. No s’han fet servir fotos ni telèfons de les famílies.
 
@@ -200,7 +200,7 @@ Referències oficials consultades:
 
 ## Pas següent
 
-FASE 3: PWA en català, calendari, proper partit, detall, estadístiques, galeria, visor, cua de pujades, edició per rol, manifest i funcionament offline. Després, FASE 4: repositori públic amb frontend i publicació. Per verificar el backend real faran falta la URL `/exec` i almenys un telèfon autoritzat. El calendari real pot arribar després.
+La PWA ja està publicada a GitHub Pages. Les proves automatitzades utilitzen dades sintètiques; el propietari comprova l’accés real al seu dispositiu. Per activar aquesta actualització, substitueix `Code.gs`, executa `installBackend` i edita la implementació existent seleccionant **Nueva versión**.
 
 ## Cromos i retrats (2.1.0)
 
@@ -212,3 +212,13 @@ FASE 3: PWA en català, calendari, proper partit, detall, estadístiques, galeri
 - Retrats: JPEG reexportat per canvas, 400 KiB, 1200 px. No s’admeten EXIF/XMP/IPTC/comentaris. No es guarden a Cache Storage ni a localStorage.
 
 Els retrats substituïts es conserven privats a Drive com a versions anteriors. L’app només permet llegir el retrat que actualment referencia el jugador.
+
+## Optimitzacions (2.2.0)
+
+- Una obertura del spreadsheet i una lectura de cada pestanya necessària per petició; les capçaleres també es comproven una vegada. Cada petició posterior torna a comprovar usuaris, dades i permisos. Les files retornades són còpies, i una escriptura invalida la instantània de la pestanya afectada.
+- La carpeta arrel i cada subcarpeta de Drive es verifiquen una vegada per petició. Les comprovacions del fitxer, parent, nom, MIME, mida i privacitat es mantenen per a cada fotografia.
+- `login` i `acceptPrivacy` admeten `include_bootstrap:true`. Només retornen `bootstrap` després d’una acceptació vigent; els clients antics conserven la resposta original.
+- `bootstrap.features.fresh_permissions=true` indica que la llista de jugadors reflecteix autorització acabada de comprovar. El frontend pot reutilitzar un retrat ja carregat que segueixi autoritzat i conservi `retrat_version`, dins la mateixa vista i rol.
+- El retrat llegit de Drive es valida directament en bytes abans de convertir-lo a base64; no es codifica i descodifica dues vegades.
+
+Consulteu [les mesures del conjunt](../PERFORMANCE-CA.md). No s’han eliminat controls de privacitat ni s’han publicat fotos de Drive.

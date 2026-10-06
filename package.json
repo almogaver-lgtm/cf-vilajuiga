@@ -1,12 +1,13 @@
 {
   "name": "cf-vilajuiga-pwa",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/domain.test.mjs tests/league.test.mjs tests/player-cards.test.mjs",
+    "test": "node --test tests/domain.test.mjs tests/league.test.mjs tests/player-cards.test.mjs tests/media-batches.test.mjs",
     "test:browser": "node tests/browser.test.mjs",
-    "test:backend": "node backend/tests/backend.test.cjs"
+    "test:backend": "node backend/tests/backend.test.cjs",
+    "test:performance": "node backend/tests/performance.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

@@ -1,5 +1,6 @@
 import {API_URL,APP_VERSION,TEAM_NAME} from './config.mjs';
 import {playerCard,POSITIONS} from './player-cards.mjs';
+import {mediaBatches} from './media-batches.mjs';
 import {LEAGUE,CLUBS,clubFor,clubMapsUrl} from './league.mjs';
 import {apiPost,requestId,prepareUpload,jpegBlob} from './api-client.mjs';
 import {esc,sortedMatches,nextMatch,lastMatch,opponent,result,dateLabel,mapsUrl,filterMatches,icsForMatch,usableSession} from './domain.mjs';
@@ -120,11 +121,12 @@ async function loadPortraits(){
  const generation=state.viewGeneration,token=state.session?.token;
  const list=(state.data.jugadors||[]).filter(j=>j.te_retrat&&!state.portraits.has(portraitKey(j))&&!state.portraitLoads.has(portraitKey(j)));
  list.forEach(j=>state.portraitLoads.add(portraitKey(j)));
- for(let i=0;i<list.length;i+=6){const chunk=list.slice(i,i+6);if(state.viewGeneration!==generation||state.session?.token!==token)return;
-  try{const r=await api({action:'getPlayerPortraits',jugador_ids:chunk.map(j=>j.jugador_id),include_hidden:isAdmin()});if(state.viewGeneration!==generation||state.session?.token!==token)return;
+ try{await mediaBatches(list,async chunk=>{
+  try{const r=await api({action:'getPlayerPortraits',jugador_ids:chunk.map(j=>j.jugador_id),include_hidden:isAdmin()});if(state.viewGeneration!==generation||state.session?.token!==token||!navigator.onLine)return false;
    for(const j of chunk){const item=r.items.find(x=>x.jugador_id===j.jugador_id);state.portraits.set(portraitKey(j),item?.ok&&item.retrat_version===j.retrat_version?imageUrl(item.base64):null);state.portraitLoads.delete(portraitKey(j));}paintPortraits();
-  }catch(e){if(state.viewGeneration!==generation)return;chunk.forEach(j=>{state.portraits.set(portraitKey(j),null);state.portraitLoads.delete(portraitKey(j));});paintPortraits();return;}
- }
+  }catch(e){if(state.viewGeneration!==generation)return false;chunk.forEach(j=>{state.portraits.set(portraitKey(j),null);state.portraitLoads.delete(portraitKey(j));});paintPortraits();return false;}
+ },()=>state.viewGeneration===generation&&state.session?.token===token&&navigator.onLine);}
+ finally{if(state.viewGeneration===generation)list.forEach(j=>state.portraitLoads.delete(portraitKey(j)));}
 }
 function playerDetails(id){const j=state.data.jugadors?.find(j=>j.jugador_id===id);if(!j)return;openModal(j.nom,`<div class="player-card-detail">${playerCard(j,{large:true,season:state.data.config?.temporada})}</div>`,isAdmin()&&state.data.features?.player_cards?actionBtn('edit-player',icon('edit')+' Editar cromo','btn',`data-id="${esc(id)}" ${canWrite()?'':'disabled'}`):'','player-dialog');paintPortraits();loadPortraits().catch(()=>{});}
 function playerEditor(id){
@@ -175,22 +177,34 @@ async function saveEdit(form){
  catch(e){if(!['OUTCOME_UNKNOWN','INTERNAL_ERROR','BUSY'].includes(e.code)&&e.name!=='TypeError')state.pendingEdit=null;const err=$('edit-error');if(err){err.hidden=false;err.textContent=e.message+(e.code==='CONFLICT'?' Tanca i actualitza abans d’editar.':'');}btn.disabled=false;btn.textContent='Reintentar el mateix canvi';}
 }
 function cacheData(){if(state.session&&state.data)write(PREFIX+'data:'+state.session.cacheKey,{savedAt:Date.now(),data:state.data});}
+function applyBootstrap(data){
+ // Reuse only portraits still authorized by a fresh server snapshot, in the same view and role.
+ const keep=new Map(),sameRole=state.data?.user?.rol===data.user?.rol;
+ if(data.features?.fresh_permissions&&data.user?.privacyAccepted&&state.view==='team'&&sameRole){
+  for(const j of data.jugadors||[]){const key=portraitKey(j),url=state.portraits.get(key);if(j.te_retrat&&url)keep.set(key,url);}
+ }
+ const keptUrls=new Set(keep.values());state.viewGeneration++;
+ state.images.forEach(url=>{if(!keptUrls.has(url)){URL.revokeObjectURL(url);state.images.delete(url);}});
+ state.portraits=keep;state.portraitLoads.clear();state.thumbs.clear();state.gallery=[];state.galleryNext=null;
+ if(modal.open&&(state.viewerPhoto||modal.querySelector('.player-card-detail')))modal.close();
+ state.data=data;state.verified=true;cacheData();
+}
 async function refresh(show=true){
  if(!state.session||state.privacy||state.loading)return;const sessionToken=state.session.token;state.loading=true;state.error='';if(show)render();
- try{const data=await api({action:'bootstrap'});if(state.session?.token!==sessionToken)return;state.data=data;state.verified=true;cacheData();forgetImages();state.gallery=[];state.galleryNext=null;}
- catch(e){state.verified=false;if(e.code==='PRIVACY_REQUIRED'){clearLocal();state.error='El compromís de privacitat ha canviat. Torna a entrar per llegir-lo.';}else if(e.code!=='UNAUTHORIZED')state.error=state.data?'No s’han pogut obtenir dades noves. Pots consultar l’última versió guardada.':e.message;}
+ try{const data=await api({action:'bootstrap'});if(state.session?.token!==sessionToken)return;applyBootstrap(data);}
+ catch(e){if(state.session?.token!==sessionToken)return;state.verified=false;forgetImages();state.gallery=[];if(modal.open&&!state.uploading)modal.close();if(e.code==='PRIVACY_REQUIRED'){clearLocal();state.error='El compromís de privacitat ha canviat. Torna a entrar per llegir-lo.';}else if(e.code!=='UNAUTHORIZED')state.error=state.data?'No s’han pogut obtenir dades noves. Pots consultar l’última versió guardada.':e.message;}
  finally{state.loading=false;render();if(state.view==='photos'&&state.verified)await loadGallery(true);if(state.view==='team'&&state.verified)await loadPortraits();}
 }
 async function login(form){
  const values=new FormData(form),phone=String(values.get('telefon')||'').trim(),code=String(values.get('codi')||'');state.loginBusy=true;state.error='';const btn=form.querySelector('[type=submit]');btn.disabled=true;btn.textContent='Entrant…';
- try{const r=await apiPost(API_URL,{action:'login',telefon:phone,...(code?{codi:code}:{}),user_agent:navigator.userAgent});clearLocal();state.authUser=r.user;state.session={token:r.token,expiresAt:r.expiresAt,cacheKey:requestId()};if(!r.user.privacyAccepted)state.privacy=r.privacy;else{persistSession();await refresh(false);}}
+ try{const r=await apiPost(API_URL,{action:'login',telefon:phone,...(code?{codi:code}:{}),include_bootstrap:true,user_agent:navigator.userAgent});clearLocal();state.authUser=r.user;state.session={token:r.token,expiresAt:r.expiresAt,cacheKey:requestId()};if(!r.user.privacyAccepted)state.privacy=r.privacy;else{persistSession();if(r.bootstrap)applyBootstrap(r.bootstrap);else await refresh(false);}}
  catch(e){state.error=e.message;}
  finally{state.loginBusy=false;render();}
 }
 async function acceptPrivacy(form){
  if(!new FormData(form).get('accepted')||!state.privacy)return;state.loginBusy=true;state.error='';const version=state.privacy.version;
- const payload=state.privacyRequest||{action:'acceptPrivacy',request_id:requestId(),accepted:true,version};state.privacyRequest=payload;render();
- try{await api(payload);state.privacy=null;state.privacyRequest=null;persistSession();await refresh(false);}
+ const payload=state.privacyRequest||{action:'acceptPrivacy',request_id:requestId(),accepted:true,version,include_bootstrap:true};state.privacyRequest=payload;render();
+ try{const r=await api(payload);state.privacy=null;state.privacyRequest=null;persistSession();if(r.bootstrap)applyBootstrap(r.bootstrap);else await refresh(false);}
  catch(e){state.error=e.message;}
  finally{state.loginBusy=false;render();}
 }
@@ -204,8 +218,10 @@ async function loadGallery(reset=false){
 }
 function paintThumbs(){state.thumbs.forEach((url,id)=>{const img=document.querySelector(`[data-thumb="${CSS.escape(id)}"]`);if(img){img.src=url;img.hidden=false;}const spinner=document.querySelector(`[data-photo-spinner="${CSS.escape(id)}"]`);if(spinner)spinner.hidden=true;});}
 async function loadThumbs(){
- const generation=state.viewGeneration,ids=state.gallery.filter(f=>!state.thumbs.has(f.foto_id)).map(f=>f.foto_id);
- for(let i=0;i<ids.length;i+=6){if(!state.session||state.viewGeneration!==generation||!navigator.onLine)return;try{const r=await api({action:'getThumbnails',foto_ids:ids.slice(i,i+6),include_hidden:state.includeHidden});if(state.viewGeneration!==generation)return;r.items.forEach(item=>{if(item.ok)state.thumbs.set(item.foto_id,imageUrl(item.base64));else{const img=document.querySelector(`[data-thumb="${CSS.escape(item.foto_id)}"]`);if(img){img.alt='Fotografia no disponible';img.hidden=false;}const spinner=document.querySelector(`[data-photo-spinner="${CSS.escape(item.foto_id)}"]`);if(spinner)spinner.hidden=true;}});paintThumbs();}catch(e){toast('Algunes miniatures no s’han carregat. Actualitza per tornar-ho a provar.');return;}}
+ const generation=state.viewGeneration,token=state.session?.token,hidden=state.includeHidden,ids=state.gallery.filter(f=>!state.thumbs.has(f.foto_id)).map(f=>f.foto_id);
+ const current=()=>!!token&&state.session?.token===token&&state.view==='photos'&&state.viewGeneration===generation&&navigator.onLine;
+ try{await mediaBatches(ids,async chunk=>{const r=await api({action:'getThumbnails',foto_ids:chunk,include_hidden:hidden});if(!current())return false;r.items.forEach(item=>{if(item.ok)state.thumbs.set(item.foto_id,imageUrl(item.base64));else{const img=document.querySelector(`[data-thumb="${CSS.escape(item.foto_id)}"]`);if(img){img.alt='Fotografia no disponible';img.hidden=false;}const spinner=document.querySelector(`[data-photo-spinner="${CSS.escape(item.foto_id)}"]`);if(spinner)spinner.hidden=true;}});paintThumbs();},current);}
+ catch(e){if(current())toast('Algunes miniatures no s’han carregat. Actualitza per tornar-ho a provar.');}
 }
 async function viewPhoto(id){
  if(!state.verified||!navigator.onLine){toast('Necessites connexió per obrir fotografies.');return;}const f=state.gallery.find(f=>f.foto_id===id);if(!f)return;state.viewerPhoto=id;
