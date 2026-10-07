@@ -1,74 +1,92 @@
-# CF Vilajuïga · La nostra temporada
+# CF Vilajuïga · Guia de l’app
 
-PWA en català, versió 3.3.0. Frontend estàtic preparat per a GitHub Pages, connectat al backend Apps Script existent. La versió 2.2.0 del backend activa totes les optimitzacions. No inclou dades personals, contrasenyes ni fotografies privades al repositori.
+PWA en català, frontend `4.0.0` i backend Apps Script `3.0.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
 
-## Publicació
+## Funcions
 
-1. Crea el repositori públic `cf-vilajuiga` a GitHub. Publica-hi els fitxers d’aquesta carpeta directament a l’arrel (no dins d’una altra carpeta).
-2. A **Settings → Pages → Build and deployment**, tria **Deploy from a branch**, branca `main`, carpeta `/ (root)` i **Save**.
-3. Obre la URL que mostri GitHub Pages. L’URL no queda confirmada fins que el desplegament s’ha completat.
-4. Entra amb el número que has autoritzat a `03_USUARIS`, accepta el compromís de privacitat i comprova el teu compte. Les proves locals han fet servir dades sintètiques; l’accés real amb el teu número queda pendent de comprovar.
+- Inici amb proper partit, últim resultat i estadístiques del CF Vilajuïga.
+- Calendari amb filtres, detall, crònica, ruta de Maps i recordatori `.ics`.
+- Galeria privada amb miniatures, visor, descàrrega registrada i administració.
+- Pujada JPEG preparada al dispositiu, sense metadades i amb etiquetatge obligatori dels jugadors o confirmació «Cap jugador identificable».
+- Àlbum de cromos amb retrats privats i edició exclusiva d’administració.
+- Secció Lliga amb els vuit equips, camps, rutes i fonts públiques.
+- Secció Famílies per crear usuaris, enviar invitacions, revocar sessions i desactivar accessos.
+- Consulta offline de l’última temporada desada mentre la sessió sigui vigent. Les fotos i escriptures sempre necessiten connexió.
 
-L’enllaç d’Apps Script ja és a `config.mjs`. Si canvies el desplegament, actualitza `API_URL`. La URL del servei és pública; els tokens i les dades privades es transmeten només al cos de les peticions.
+## Accés i permisos
 
-## Què hi trobaràs
+L’accés es fa amb telèfon i un codi de quatre xifres creat per l’administrador. El codi:
 
-- Inici amb proper partit, últim resultat i estadístiques.
-- Calendari amb filtres, detall, crònica, ruta de Google Maps i recordatori `.ics` (durada orientativa de 90 minuts).
-- Equip: àlbum de cromos amb marc platejat, foto, escut, nom, dorsal i posició. L’administrador pot afegir i editar els cromos; la resta de famílies els consulten. Cal activar el backend 2.1.0 per editar i carregar retrats.
-- Lliga: fitxes dels 8 equips de l’Aleví masculí, Fase 1, Grup 1, amb municipi, camp, adreça, ruta i fonts consultades. El partit contra cada rival s’enllaça amb el calendari privat.
-- Galeria privada per partit, visor, descàrrega amb avís i registre, etiquetes de jugadors i pujada de fotografies d’una en una.
-- Compressió local a JPEG, límit de 1.5 MiB, costat màxim 1600 px; miniatures de fins a 480 px i 120 KiB. La reexportació elimina les metadades de la fotografia original.
-- Si falla una pujada, es conserven a memòria els mateixos identificadors per reintentar-la sense duplicar-la. Mantén la pestanya oberta; en tancar-la es perd aquesta cua.
-- Família: consulta i fotos. Editor: també resultats i cròniques. Administrador: també fotos ocultes, ocultar/mostrar i eliminació permanent amb confirmació. El servidor comprova tots els permisos i les restriccions dels jugadors.
-- Sense connexió: consulta de l’última temporada guardada mentre la sessió sigui vigent. No hi ha fotos ni escriptures offline.
-- Sortir esborra el token, la còpia local de les dades i les imatges temporals del dispositiu. Una revocació es coneix en recuperar connexió; un dispositiu desconnectat pot consultar la còpia local fins que la sessió caduqui.
+- és d’un sol ús;
+- caduca al cap de 48 hores per defecte;
+- queda bloquejat després de cinc intents incorrectes;
+- es desa hashejat i només es mostra una vegada;
+- no apareix al registre d’auditoria.
 
-El calendari real de la primera fase ja s’ha importat a `01_PARTITS`: 7 jornades d’anada, del 10 d’octubre al 22 de novembre de 2026. Dates i hores contrastades amb les pàgines 2–3 del PDF facilitat (Calendari 220). S’han mantingut els marcadors buits i tots els partits pendents. No s’han afegit jugadors ni usuaris de demostració.
+Rols:
 
-El primer partit és a Palau-saverdera, dissabte 10 d’octubre a les 10:00. Hi ha 3 partits a casa i 4 a fora. La capçalera del PDF arriba al 21 de desembre, però no inclou jornades posteriors al 22 de novembre.
+| Acció | Família | Editor | Admin |
+|---|:---:|:---:|:---:|
+| Consultar temporada, cromos i fotos autoritzades | Sí | Sí | Sí |
+| Pujar i descarregar fotos | Sí | Sí | Sí |
+| Editar resultats i cròniques | — | Sí | Sí |
+| Gestionar cromos, fotos ocultes i famílies | — | — | Sí |
 
-La secció Lliga usa informació pública consultada el 6 d’octubre de 2026; cada fitxa enllaça les fonts. A Palau hi ha una discrepància de numeració (22 al PDF i 24 a la FCF), per això la ruta cerca el camp municipal de la zona esportiva. Per La Finca s’usa la referència del catàleg municipal de Figueres; el PDF no concreta l’accés dins del recinte. Navata conserva el marcador de Maps del PDF, que correspon a Carrer de Figueres, 4. No s’han inventat coordenades, classificacions ni escuts dels rivals: els distintius són abreviacions gràfiques.
+El servidor torna a comprovar usuari, rol, activació i privacitat a cada petició. Quan queden menys de set dies, la sessió es renova automàticament. Revocar sessions incrementa `sessio_epoch` i invalida tots els dispositius d’aquell usuari.
 
-## Instal·lació al mòbil
+## Desplegament 4.0.0
 
-Android: menú del navegador → Instal·lar app / Afegir a la pantalla d’inici.
-iPhone: Safari → Compartir → Afegir a la pantalla d’inici.
+Aquest canvi substitueix el login anterior i invalida les sessions existents. Cal respectar aquest ordre perquè GitHub Pages publica el frontend automàticament en fer `push`:
 
-Si tenies oberta la versió anterior, tanca totes les pestanyes de l’app (i l’app instal·lada) i torna-la a obrir perquè s’activi el nou service worker.
+1. Fes una còpia del Sheet real.
+2. Substitueix `backend/Code.gs` i `backend/appsscript.json` al projecte Apps Script.
+3. Executa `installBackend()`. Migra `03_USUARIS`, crea `07_INVITACIONS`, elimina `login_mode` i afegeix `invite_ttl_hours`.
+4. Executa temporalment una funció que cridi `adminInvite('+34XXXXXXXXX')` per obtenir la primera invitació d’administració.
+5. A **Gestiona els desplegaments → Edita → Nova versió**, publica el backend conservant la mateixa URL `/exec`.
+6. Comprova `API_URL?action=health`: ha de retornar `version: "3.0.0"` i `configured: true`.
+7. Prova la invitació, calendari, marcador, pujada, visualització, descàrrega i eliminació amb dades reals.
+8. Publica el frontend `4.0.0` a GitHub Pages.
+9. Tanca totes les pestanyes i l’app instal·lada abans de tornar-la a obrir perquè s’activi el service worker nou.
 
-Cal servir l’app amb HTTPS (GitHub Pages ho proporciona) o localhost. Obrir `index.html` amb doble clic no serveix per provar els mòduls ni la PWA. Per provar-la localment: `python3 -m http.server 8080` des de la carpeta, i visita `http://localhost:8080`.
+No publiquis el frontend `4.0.0` mentre el backend públic continuï a `2.x`: l’acció `redeemInvite` encara no existirà.
+
+## Administració
+
+- `adminInvite(telefon)`: crea la primera invitació o recupera l’accés de l’administrador des de l’editor.
+- `addUser(telefon, nom, rol)`: crea manualment un usuari abans de convidar-lo.
+- `maintenance()`: neteja revocacions caducades i invitacions finalitzades de més de 30 dies.
+- `purgaRegistre(dies)`: elimina manualment registres més antics que la retenció indicada; per defecte, 120 dies.
+- `recoverPendingMatchAudits()`: completa auditories pendents d’una edició de partit.
+
+Programa `maintenance()` amb un activador setmanal. En acabar la temporada, conserva només les dades personals necessàries.
+
+## Desenvolupament local
+
+No obris `index.html` amb doble clic. Serveix el projecte per HTTP:
+
+```bash
+# Windows
+py -m http.server 8080
+
+# macOS / Linux
+python3 -m http.server 8080
+```
+
+Després visita `http://localhost:8080`.
 
 ## Validació
 
-`npm test` comprova la transcripció de les 7 jornades, els camps locals, els 8 equips, les rutes i dates de Madrid, selecció de partits, resultats, mapes, escapament del calendari i caducitat de sessió.
+```bash
+npm test
+npm run test:backend
+npm run test:performance
+npm run test:browser
+```
 
-Per repetir les proves de navegador: `npm install`, `npx playwright install chromium`, `npm run test:browser` (també cal Python 3). Si disposes d’un Chromium instal·lat, pots especificar `CHROMIUM_EXECUTABLE`.
+Abans de convidar famílies, repeteix les proves principals contra el Sheet i Drive reals. Les proves locals utilitzen serveis simulats i no validen quotes, permisos heretats, CORS o latència real de Google.
 
-Proves addicionals executades en Chromium amb API simulada: consentiment abans de persistir sessió, mòbil/ordinador sense desbordament, edició de marcador, miniatures i visor, descàrrega, reintent de pujada amb els mateixos UUID, consulta offline, neteja en sortir, permisos de família, revocació de sessió i temporada buida. També s’ha comprovat la secció Lliga en 390 i 360 px, les fonts i l’accés des de la fitxa del rival al partit corresponent. El service worker només emmagatzema la llista tancada de fitxers estàtics; no intercepta les peticions del backend ni guarda fotos privades.
+## Crèdits
 
-## Disseny i crèdits
-
-Blau i blanc, titulars esportius i navegació inferior al mòbil. La fotografia de portada és ambiental i no representa el camp de Vilajuïga.
-
-- Foto: Nikola Tomašić, Unsplash, https://unsplash.com/photos/soccer-ball-rests-in-the-grass-at-sunset-GTxVeJj1UU0 (llicència Unsplash).
-- Escut: publicat a https://futbol-regional.es/equipo.php?equ=15064, imatge https://futbol-regional.es/media/historico/escudos/17896.jpg. Cal confirmar amb el club que és la versió actual. És una marca del club, no un recurs declarat de domini públic.
-- Icona d’app: monograma V creat per a aquesta interfície.
-- Barlow Condensed: The Barlow Project Authors / Jeremy Tribby. SIL Open Font License 1.1, inclosa a `assets/OFL.txt`; font distribuïda per Google Fonts.
-
-## Activar els cromos i les optimitzacions (backend 2.2.0)
-
-El frontend 3.3.0 funciona també amb el backend 2.0.0: mostra els noms i dorsals amb el nou disseny. La foto, la posició i el formulari d’edició s’activen quan Google serveix el backend 2.1.0 o posterior. Per reduir lectures repetides i càrregues inicials, publica el backend 2.2.0.
-
-1. Al projecte Apps Script existent, substitueix el contingut de `Code.gs` pel de [backend/Code.gs](backend/Code.gs). Guarda’l. El manifest continua sent el mateix.
-2. Executa `installBackend` una vegada. És una actualització sobre les dades existents: afegeix les noves columnes de jugadors, conserva usuaris, partits i configuració, i comprova la carpeta privada `jugadors`.
-3. A **Implementar → Gestionar implementaciones**, edita la implementació actual (llapis), tria **Nueva versión** i prem **Implementar**. Així es conserva la mateixa URL `/exec`.
-4. Tanca totes les pestanyes de l’app i torna-la a obrir. A **Equip** apareixerà **Afegir jugador** per al rol `admin`.
-
-Retrats: es trien al formulari del cromo. L’app els reexporta a JPEG sense metadades, màxim 1200 px i 400 KiB, i els desa a `fotos/jugadors`. No cal publicar Drive, copiar enllaços ni tocar els identificadors interns. Els retrats anteriors substituïts es conserven privats a Drive; l’app només serveix el vigent. Les fotos dels partits es continuen pujant des de Galeria i van a les subcarpetes de cada partit.
-
-A `05_JUGADORS`, els camps que pots omplir manualment són `jugador_id`, `nom`, `dorsal`, `no_mostrar`, `actiu` i `posicio`. Posicions exactes: `Porter`, `Defensa`, `Migcampista`, `Davanter`, o buit. Per crear jugadors manualment cal un ID únic, `actiu=TRUE` i `no_mostrar=FALSE` per als cromos compartits. Els camps des de `foto_id` fins a `ultima_peticio_hash` els gestiona l’app. No afegeixis usuaris ni jugadors de mostra a les dades reals.
-
-## Rendiment (3.3.0 / backend 2.2.0)
-
-[Mesures reproduïbles, canvis i límits de la validació](PERFORMANCE-CA.md). L’app manté compatibilitat amb els backend 2.0.0 i 2.1.0; les optimitzacions del servidor requereixen desar el nou `Code.gs` i seleccionar **Nueva versión** en editar el desplegament existent. El manifest i la URL es conserven. Les imatges continuen fora del service worker i de localStorage.
+- Foto ambiental: Nikola Tomašić, Unsplash.
+- Escut: marca del club; confirma que la versió publicada continua vigent.
+- Barlow Condensed: The Barlow Project Authors / Jeremy Tribby, SIL Open Font License 1.1.

@@ -1,6 +1,6 @@
-# Rendiment · CF Vilajuïga 3.3.0 / backend 2.2.0
+# Rendiment · CF Vilajuïga 4.0.0 / backend 3.0.0
 
-Les millores redueixen operacions repetides sense migrar dades ni publicar les fotografies de Drive. El desplegament del nou `Code.gs` és necessari per activar la part del servidor; el frontend continua funcionant amb els backend 2.0.0 i 2.1.0.
+Les optimitzacions de lectura de la versió 2.2.0 es mantenen a 3.0.0. La versió 3.0.0 afegeix invitacions d’un sol ús, renovació de sessió, dades de Sheet més tolerants i etiquetatge obligatori de fotografies.
 
 ## Mesures amb dades sintètiques
 
@@ -27,8 +27,8 @@ Altres diferències verificades al navegador amb API simulada:
 
 | Operació | Abans | Ara |
 |---|---|---|
-| Entrar amb consentiment vigent | `login` + `bootstrap` | `login` amb dades inicials: 1 petició |
-| Primer accés amb acceptació | `login` + `acceptPrivacy` + `bootstrap` | 2 peticions; cap dada abans d'acceptar |
+| Entrar amb consentiment vigent | `redeemInvite` + `bootstrap` | `redeemInvite` amb dades inicials: 1 petició |
+| Primer accés amb acceptació | `redeemInvite` + `acceptPrivacy` + `bootstrap` | 2 peticions; cap dada abans d'acceptar |
 | Actualitzar l'àlbum amb retrats vigents | Descarrega de nou tots els retrats | Reutilitza els retrats que el servidor confirma autoritzats |
 | Carregar més de sis retrats o miniatures | Paquets successius | Fins a 2 paquets simultanis, de 6 imatges cadascun |
 
@@ -52,6 +52,6 @@ No s'ha mesurat el temps d'entrada ni de galeria amb un compte real. Les proves 
 
 1. Substitueix `Code.gs` per [backend/Code.gs](backend/Code.gs), desa'l i executa `installBackend`. És repetible i conserva les dades existents.
 2. A **Implementar → Gestionar implementaciones → llapis**, selecciona **Versión: Nueva versión** i prem **Implementar**. Conserva la mateixa URL `/exec`.
-3. Tanca totes les pestanyes i l'app instal·lada, i torna-la a obrir. El servei públic ha d'indicar `version: 2.2.0`.
+3. Tanca totes les pestanyes i l'app instal·lada, i torna-la a obrir. El servei públic ha d'indicar `version: 3.0.0`.
 
 El manifest d'Apps Script no canvia. No cal moure fotos, modificar el Sheet ni crear un altre desplegament.
