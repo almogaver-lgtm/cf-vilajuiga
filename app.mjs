@@ -8,11 +8,14 @@ const $=id=>document.getElementById(id);
 const root=$('app'),modal=$('modal');
 const PREFIX='cfv:v3:'+new URL('.',import.meta.url).pathname+':';
 const SESSION_KEY=PREFIX+'session';
-const read=k=>{try{return JSON.parse(localStorage.getItem(k));}catch{return null;}};
+const storedValue=k=>{try{return localStorage.getItem(k);}catch{return null;}};
+const parseStored=value=>{try{return value===null?null:JSON.parse(value);}catch{return null;}};
+const read=k=>parseStored(storedValue(k));
 const write=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true;}catch{return false;}};
 function remove(k){try{localStorage.removeItem(k);}catch{}}
 function clearStored(){try{Object.keys(localStorage).filter(k=>k.startsWith(PREFIX)).forEach(k=>localStorage.removeItem(k));}catch{}}
 const stored=read(SESSION_KEY);
+let sessionGeneration=0,authAttemptGeneration=0;
 const state={session:usableSession(stored)?stored:null,data:null,view:'home',filter:'all',verified:false,loading:false,error:'',loginBusy:false,
   privacy:null,authUser:null,galleryMatch:'',gallery:[],galleryNext:null,galleryLoading:false,includeHidden:false,thumbs:new Map(),images:new Set(),
   queue:null,uploading:false,installEvent:null,modalMatch:null,editMode:'result',viewerPhoto:null,viewGeneration:0,portraits:new Map(),portraitLoads:new Set(),playerDraft:null,
@@ -32,13 +35,22 @@ const initials=name=>String(name||'?').split(' ').map(s=>s[0]).slice(0,2).join('
 function toast(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').hidden=true,6500);}
 function forgetImages(){state.viewGeneration++;state.images.forEach(url=>URL.revokeObjectURL(url));state.images.clear();state.thumbs.clear();state.portraits.clear();state.portraitLoads.clear();}
 function imageUrl(base64){const url=URL.createObjectURL(jpegBlob(base64));state.images.add(url);return url;}
-function clearLocal(){forgetImages();clearStored();Object.assign(state,{session:null,data:null,authUser:null,privacy:null,verified:false,queue:null,gallery:[],galleryNext:null,galleryMatch:'',includeHidden:false,viewerPhoto:null,pendingEdit:null,pendingDownload:null,pendingDelete:null,privacyRequest:null,view:'home',filter:'all',playerDraft:null,users:[],usersLoading:false,inviteMessage:''});if(modal.open)modal.close();}
+function resetSessionState(){sessionGeneration++;forgetImages();Object.assign(state,{session:null,data:null,authUser:null,privacy:null,verified:false,loading:false,loginBusy:false,queue:null,uploading:false,gallery:[],galleryNext:null,galleryMatch:'',galleryLoading:false,includeHidden:false,modalMatch:null,editMode:'result',viewerPhoto:null,pendingEdit:null,pendingDownload:null,pendingDelete:null,privacyRequest:null,view:'home',filter:'all',playerDraft:null,playerPreviewUrl:null,users:[],usersLoading:false,inviteMessage:''});if(modal.open)modal.close();modal.replaceChildren();}
+function clearLocal(){clearStored();resetSessionState();}
+function staleSessionError(){return Object.assign(new Error('La sessió ha canviat en una altra pestanya.'),{code:'STALE_SESSION'});}
+const sessionIdentity=()=>({cacheKey:state.session?.cacheKey||null,generation:sessionGeneration});
+const isCurrentSession=identity=>!!identity.cacheKey&&state.session?.cacheKey===identity.cacheKey&&sessionGeneration===identity.generation;
+function beginAuthAttempt(){const sharedSession=storedValue(SESSION_KEY);return {id:++authAttemptGeneration,generation:sessionGeneration,cacheKey:state.session?.cacheKey||null,sharedSession,allowMissing:!!state.privacy&&sharedSession===null,adopted:null};}
+function sharedSessionMatches(identity,expectedShared,allowMissing=false){const raw=storedValue(SESSION_KEY),shared=parseStored(raw);return isCurrentSession(identity)&&((usableSession(shared)&&shared.cacheKey===identity.cacheKey)||(allowMissing&&raw===null&&expectedShared===null));}
+function sharedSessionUsesToken(identity,token){const shared=read(SESSION_KEY);return isCurrentSession(identity)&&usableSession(shared)&&shared.cacheKey===identity.cacheKey&&shared.token===token;}
+function isCurrentAuthAttempt(attempt){if(attempt.id!==authAttemptGeneration)return false;const identity=attempt.adopted||{cacheKey:attempt.cacheKey,generation:attempt.generation};if(!identity.cacheKey)return sessionGeneration===attempt.generation&&!state.session&&storedValue(SESSION_KEY)===attempt.sharedSession;return sharedSessionMatches(identity,attempt.sharedSession,attempt.allowMissing);}
+function discardStaleSharedSession(identity){if(!isCurrentSession(identity))return;if(state.session?.cacheKey)remove(PREFIX+'data:'+state.session.cacheKey);resetSessionState();state.error='La sessió ha canviat en una altra pestanya. Torna a entrar.';render();}
 async function api(payload){
- if(!state.session)throw Object.assign(new Error('Cal iniciar sessió.'),{code:'UNAUTHORIZED'});
- try{return await apiPost(API_URL,{...payload,token:state.session.token,user_agent:navigator.userAgent});}
- catch(e){if(e.code==='UNAUTHORIZED'){clearLocal();state.error='La sessió ha caducat o s’ha revocat. Torna a entrar.';render();}throw e;}
+ const session=state.session,identity=sessionIdentity(),sharedSession=storedValue(SESSION_KEY),allowMissing=!!state.privacy&&sharedSession===null;if(!session)throw Object.assign(new Error('Cal iniciar sessió.'),{code:'UNAUTHORIZED'});if(!sharedSessionMatches(identity,sharedSession,allowMissing))throw staleSessionError();
+ try{const data=await apiPost(API_URL,{...payload,token:session.token,user_agent:navigator.userAgent});if(!isCurrentSession(identity))throw staleSessionError();if(!sharedSessionMatches(identity,sharedSession,allowMissing)){discardStaleSharedSession(identity);throw staleSessionError();}return data;}
+ catch(e){if(e.code==='UNAUTHORIZED'&&sharedSessionUsesToken(identity,session.token)&&state.session?.token===session.token){clearLocal();state.error='La sessió ha caducat o s’ha revocat. Torna a entrar.';render();}throw e;}
 }
-function persistSession(){write(SESSION_KEY,state.session);}
+function persistSession(identity=sessionIdentity(),expectedShared=storedValue(SESSION_KEY),allowMissing=false){if(!sharedSessionMatches(identity,expectedShared,allowMissing))return false;const serialized=JSON.stringify(state.session);if(!write(SESSION_KEY,state.session))return false;return storedValue(SESSION_KEY)===serialized;}
 function render(){
  if(!state.session||state.privacy)return renderLogin();
  if(!state.data)return renderLoading();
@@ -189,16 +201,17 @@ function playerEditor(id){
 function updatePlayerPreview(form){if(state.playerDraft)return;const values=new FormData(form);$('player-live-preview').innerHTML=playerCard({nom:String(values.get('nom')||'El teu nom'),dorsal:values.get('dorsal'),posicio:values.get('posicio')},{preview:true,season:state.data.config?.temporada});const file=form.elements.retrat.files[0];if(state.playerPreviewUrl){URL.revokeObjectURL(state.playerPreviewUrl);state.images.delete(state.playerPreviewUrl);state.playerPreviewUrl=null;}if(file){const img=document.createElement('img');img.className='player-portrait';img.alt='Previsualització local del retrat';img.src=imageUrlFromFile(file);state.playerPreviewUrl=img.src;const frame=$('player-live-preview').querySelector('.card-photo');frame.querySelector('.card-silhouette').hidden=true;frame.appendChild(img);}}
 function imageUrlFromFile(file){const url=URL.createObjectURL(file);state.images.add(url);return url;}
 async function savePlayer(form){
- if(!isAdmin()||!canWrite())return;const token=state.session?.token,values=new FormData(form),button=form.querySelector('[type=submit]');
- const draft={action:'savePlayer',jugador_id:state.playerDraft?.payload.jugador_id||form.dataset.id||requestId(),nom:String(values.get('nom')||'').trim(),dorsal:values.get('dorsal')===''?'':Number(values.get('dorsal')),posicio:values.get('posicio'),expected_updated_at:form.dataset.expected};
+ if(!isAdmin()||!canWrite())return;const identity=sessionIdentity(),existing=state.playerDraft,values=new FormData(form),button=form.querySelector('[type=submit]');
+ const draft={action:'savePlayer',jugador_id:existing?.payload.jugador_id||form.dataset.id||requestId(),nom:String(values.get('nom')||'').trim(),dorsal:values.get('dorsal')===''?'':Number(values.get('dorsal')),posicio:values.get('posicio'),expected_updated_at:form.dataset.expected};
  const signature=JSON.stringify(draft),file=form.elements.retrat.files[0];
- if(state.playerDraft&&(state.playerDraft.signature!==signature||file)){ $('player-error').hidden=false;$('player-error').textContent='Hi ha un desament pendent. Reintenta els mateixos valors abans de canviar-los.';return;}
+ if(existing&&(existing.signature!==signature||file)){ $('player-error').hidden=false;$('player-error').textContent='Hi ha un desament pendent. Reintenta els mateixos valors abans de canviar-los.';return;}
  state.uploading=true;button.disabled=true;button.textContent='Guardant cromo…';modal.querySelector('[data-action=close]').disabled=true;
  try{
-  if(!state.playerDraft){const payload={...draft,request_id:requestId()};if(file){const prepared=await prepareUpload(file,{config:{...state.data.config,image_max_dimension:state.data.config.portrait_max_dimension||1200,upload_max_bytes:state.data.config.portrait_max_bytes||409600}});payload.photo_base64=prepared.photo_base64;payload.foto_id=prepared.foto_id;}state.playerDraft={id:form.dataset.id||undefined,signature,payload};}
-  await api(state.playerDraft.payload);if(state.session?.token!==token)return;state.playerDraft=null;state.uploading=false;modal.close();await refresh(false);toast('Cromo guardat a l’àlbum.');
- }catch(e){if(state.session?.token!==token)return;if(['VALIDATION','FORBIDDEN','CONFLICT'].includes(e.code))state.playerDraft=null;$('player-error').hidden=false;$('player-error').textContent=e.message;button.textContent=state.playerDraft?'Reintentar el mateix cromo':'Guardar cromo';if(state.playerDraft)form.elements.retrat.value='';}
- finally{state.uploading=false;if(button.isConnected){button.disabled=false;modal.querySelector('[data-action=close]').disabled=false;}}
+  let transaction=existing;
+  if(!transaction){const payload={...draft,request_id:requestId()};if(file){const prepared=await prepareUpload(file,{config:{...state.data.config,image_max_dimension:state.data.config.portrait_max_dimension||1200,upload_max_bytes:state.data.config.portrait_max_bytes||409600}});if(!isCurrentSession(identity))return;payload.photo_base64=prepared.photo_base64;payload.foto_id=prepared.foto_id;}if(!isCurrentSession(identity))return;transaction={id:form.dataset.id||undefined,signature,payload};state.playerDraft=transaction;}
+  if(!isCurrentSession(identity))return;await api(transaction.payload);if(!isCurrentSession(identity))return;state.playerDraft=null;state.uploading=false;modal.close();await refresh(false);if(isCurrentSession(identity))toast('Cromo guardat a l’àlbum.');
+ }catch(e){if(!isCurrentSession(identity))return;if(['VALIDATION','FORBIDDEN','CONFLICT'].includes(e.code))state.playerDraft=null;const error=$('player-error');if(error){error.hidden=false;error.textContent=e.message;}if(button.isConnected){button.textContent=state.playerDraft?'Reintentar el mateix cromo':'Guardar cromo';if(state.playerDraft)form.elements.retrat.value='';}}
+ finally{if(isCurrentSession(identity)){state.uploading=false;if(button.isConnected){button.disabled=false;const close=modal.querySelector('[data-action=close]');if(close)close.disabled=false;}}}
 }
 
 function openModal(title,body,footer='',className=''){modal.className=className;modal.innerHTML=`<header class="dialog-header"><h2 id="modal-title">${esc(title)}</h2>${actionBtn('close',icon('close'),'icon-btn','aria-label="Tancar"')}</header><div class="dialog-body">${body}</div>${footer?`<footer class="dialog-footer">${footer}</footer>`:''}`;if(!modal.open)modal.showModal();}
@@ -227,8 +240,9 @@ async function saveEdit(form){
  catch(e){if(!['OUTCOME_UNKNOWN','INTERNAL_ERROR','BUSY'].includes(e.code)&&e.name!=='TypeError')state.pendingEdit=null;const err=$('edit-error');if(err){err.hidden=false;err.textContent=e.message+(e.code==='CONFLICT'?' Tanca i actualitza abans d’editar.':'');}btn.disabled=false;btn.textContent='Reintentar el mateix canvi';}
 }
 function cacheData(){if(state.session&&state.data)write(PREFIX+'data:'+state.session.cacheKey,{savedAt:Date.now(),data:state.data});}
-function applyBootstrap(data){
- if(data.renewed&&state.session){state.session={...state.session,token:data.renewed.token,expiresAt:data.renewed.expiresAt};persistSession();data={...data};delete data.renewed;}
+function applyBootstrap(data,identity=sessionIdentity()){
+ if(!sharedSessionMatches(identity))return false;
+ if(data.renewed&&state.session){const previous=state.session;state.session={...state.session,token:data.renewed.token,expiresAt:data.renewed.expiresAt};if(!persistSession(identity)){state.session=previous;return false;}data={...data};delete data.renewed;}
  // Reuse only portraits still authorized by a fresh server snapshot, in the same view and role.
  const keep=new Map(),sameRole=state.data?.user?.rol===data.user?.rol;
  if(data.features?.fresh_permissions&&data.user?.privacyAccepted&&state.view==='team'&&sameRole){
@@ -239,26 +253,26 @@ function applyBootstrap(data){
  state.portraits=keep;state.portraitLoads.clear();state.thumbs.clear();state.gallery=[];state.galleryNext=null;
  if(modal.open&&(state.viewerPhoto||modal.querySelector('.player-card-detail')))modal.close();
  if(data.user?.rol!=='admin'){state.users=[];if(state.view==='families')state.view='home';}
- state.data=data;state.verified=true;cacheData();
+ state.data=data;state.verified=true;cacheData();return true;
 }
 async function refresh(show=true){
- if(!state.session||state.privacy||state.loading)return;const sessionToken=state.session.token;state.loading=true;state.error='';if(show)render();
- try{const data=await api({action:'bootstrap'});if(state.session?.token!==sessionToken)return;applyBootstrap(data);}
- catch(e){if(state.session?.token!==sessionToken)return;state.verified=false;forgetImages();state.gallery=[];if(modal.open&&!state.uploading)modal.close();if(e.code==='PRIVACY_REQUIRED'){clearLocal();state.error='El compromís de privacitat ha canviat. Torna a entrar per llegir-lo.';}else if(e.code!=='UNAUTHORIZED')state.error=state.data?'No s’han pogut obtenir dades noves. Pots consultar l’última versió guardada.':e.message;}
- finally{state.loading=false;render();if(state.view==='photos'&&state.verified)await loadGallery(true);if(state.view==='team'&&state.verified)await loadPortraits();}
+ if(!state.session||state.privacy||state.loading)return;const identity=sessionIdentity(),sessionToken=state.session.token;state.loading=true;state.error='';if(show)render();
+ try{const data=await api({action:'bootstrap'});if(!isCurrentSession(identity)||state.session?.token!==sessionToken)return;if(!applyBootstrap(data,identity))return;}
+ catch(e){if(!isCurrentSession(identity)||state.session?.token!==sessionToken)return;state.verified=false;forgetImages();state.gallery=[];if(modal.open&&!state.uploading)modal.close();if(e.code==='PRIVACY_REQUIRED'){clearLocal();state.error='El compromís de privacitat ha canviat. Torna a entrar per llegir-lo.';}else if(e.code!=='UNAUTHORIZED')state.error=state.data?'No s’han pogut obtenir dades noves. Pots consultar l’última versió guardada.':e.message;}
+ finally{if(isCurrentSession(identity)){state.loading=false;render();if(state.view==='photos'&&state.verified)await loadGallery(true);if(state.view==='team'&&state.verified)await loadPortraits();}}
 }
 async function login(form){
- const values=new FormData(form),phone=String(values.get('telefon')||'').trim(),code=String(values.get('codi')||'').trim();state.loginBusy=true;state.error='';const btn=form.querySelector('[type=submit]');btn.disabled=true;btn.textContent='Entrant…';
- try{const r=await apiPost(API_URL,{action:'redeemInvite',telefon:phone,codi:code,include_bootstrap:true,user_agent:navigator.userAgent});clearLocal();state.authUser=r.user;state.session={token:r.token,expiresAt:r.expiresAt,cacheKey:requestId()};if(!r.user.privacyAccepted)state.privacy=r.privacy;else{persistSession();if(r.bootstrap)applyBootstrap(r.bootstrap);else await refresh(false);}}
- catch(e){state.error=e.message;}
- finally{state.loginBusy=false;render();}
+ const values=new FormData(form),phone=String(values.get('telefon')||'').trim(),code=String(values.get('codi')||'').trim(),attempt=beginAuthAttempt();state.loginBusy=true;state.error='';const btn=form.querySelector('[type=submit]');btn.disabled=true;btn.textContent='Entrant…';
+ try{const r=await apiPost(API_URL,{action:'redeemInvite',telefon:phone,codi:code,include_bootstrap:true,user_agent:navigator.userAgent});if(!isCurrentAuthAttempt(attempt))return;clearLocal();attempt.sharedSession=storedValue(SESSION_KEY);state.authUser=r.user;state.session={token:r.token,expiresAt:r.expiresAt,cacheKey:requestId()};attempt.adopted=sessionIdentity();attempt.allowMissing=true;if(!r.user.privacyAccepted)state.privacy=r.privacy;else{if(!persistSession(attempt.adopted,attempt.sharedSession,true)){resetSessionState();return;}attempt.sharedSession=storedValue(SESSION_KEY);attempt.allowMissing=false;if(r.bootstrap){if(!applyBootstrap(r.bootstrap,attempt.adopted)){resetSessionState();return;}}else await refresh(false);}}
+ catch(e){if(isCurrentAuthAttempt(attempt))state.error=e.message;}
+ finally{if(isCurrentAuthAttempt(attempt)){state.loginBusy=false;render();}}
 }
 async function acceptPrivacy(form){
- if(!new FormData(form).get('accepted')||!state.privacy)return;state.loginBusy=true;state.error='';const version=state.privacy.version;
+ if(!new FormData(form).get('accepted')||!state.privacy)return;const attempt=beginAuthAttempt();state.loginBusy=true;state.error='';const version=state.privacy.version;
  const payload=state.privacyRequest||{action:'acceptPrivacy',request_id:requestId(),accepted:true,version,include_bootstrap:true};state.privacyRequest=payload;render();
- try{const r=await api(payload);state.privacy=null;state.privacyRequest=null;persistSession();if(r.bootstrap)applyBootstrap(r.bootstrap);else await refresh(false);}
- catch(e){state.error=e.message;}
- finally{state.loginBusy=false;render();}
+ try{const r=await api(payload);if(!isCurrentAuthAttempt(attempt))return;const identity=sessionIdentity();if(!persistSession(identity,attempt.sharedSession,true)){resetSessionState();return;}attempt.sharedSession=storedValue(SESSION_KEY);attempt.allowMissing=false;attempt.adopted=identity;state.privacy=null;state.privacyRequest=null;if(r.bootstrap){if(!applyBootstrap(r.bootstrap,identity)){resetSessionState();return;}}else await refresh(false);}
+ catch(e){if(isCurrentAuthAttempt(attempt))state.error=e.message;}
+ finally{if(isCurrentAuthAttempt(attempt)){state.loginBusy=false;render();}}
 }
 async function loadGallery(reset=false){
  if(!state.verified||!navigator.onLine||state.galleryLoading||!state.galleryMatch)return;const selected=state.galleryMatch,hidden=state.includeHidden,token=state.session?.token;
@@ -311,13 +325,13 @@ function queueDialog(){
  const close=modal.querySelector('[data-action=close]');if(close)close.disabled=state.uploading;
 }
 async function uploadQueue(){
- if(!state.queue||state.uploading||!state.verified||!navigator.onLine)return;state.uploading=true;queueDialog();const q=state.queue,sessionToken=state.session?.token;
- for(const item of q.items){if(item.status==='done')continue;if(!navigator.onLine){item.status='failed';item.error='S’ha perdut la connexió. Les fotos anteriors ja estan guardades.';break;}
+ if(!state.queue||state.uploading||!state.verified||!navigator.onLine)return;const identity=sessionIdentity(),q=state.queue;state.uploading=true;queueDialog();
+ for(const item of q.items){if(!isCurrentSession(identity))return;if(item.status==='done')continue;if(!navigator.onLine){item.status='failed';item.error='S’ha perdut la connexió. Les fotos anteriors ja estan guardades.';break;}
   item.status='uploading';item.error='';queueDialog();
-  try{if(!item.prepared)item.prepared=await prepareUpload(item.file,{partit_id:q.partit_id,jugadors_ids:q.jugadors_ids,sense_jugadors:q.sense_jugadors,peu:q.peu,config:state.data.config});await api(item.prepared);if(state.session?.token!==sessionToken)break;item.status='done';item.prepared=null;}
-  catch(e){item.status='failed';item.error=e.message;if(['VALIDATION','FORBIDDEN','PRIVACY_REQUIRED'].includes(e.code))item.prepared=null;break;}
+  try{const prepared=item.prepared||await prepareUpload(item.file,{partit_id:q.partit_id,jugadors_ids:q.jugadors_ids,sense_jugadors:q.sense_jugadors,peu:q.peu,config:state.data.config});if(!isCurrentSession(identity))return;item.prepared=prepared;await api(prepared);if(!isCurrentSession(identity))return;item.status='done';item.prepared=null;}
+  catch(e){if(!isCurrentSession(identity))return;item.status='failed';item.error=e.message;if(['VALIDATION','FORBIDDEN','PRIVACY_REQUIRED'].includes(e.code))item.prepared=null;break;}
  }
- state.uploading=false;if(state.session?.token===sessionToken){queueDialog();await loadGallery(true);}
+ if(isCurrentSession(identity)){state.uploading=false;queueDialog();await loadGallery(true);}
 }
 async function navigate(view){if(!['home','calendar','photos','team','league',...(isAdmin()?['families']:[])].includes(view))return;if(['photos','team'].includes(state.view)&&view!==state.view){forgetImages();state.gallery=[];state.galleryNext=null;}if(state.view==='families'&&view!=='families')state.users=[];state.view=view;state.error='';render();window.scrollTo({top:0,behavior:'instant'});if(view==='photos')await loadGallery(true);if(view==='families')await loadUsers();}
 function account(){const roleNames={familia:'Família',editor:'Editor',admin:'Administrador'};openModal('El teu espai',`<div class="account-summary"><div class="avatar">${esc(initials(user().nom))}</div><div><h3>${esc(user().nom)}</h3><p>${esc(roleNames[user().rol]||'Família')}</p></div></div><div class="account-links">${actionBtn('install',icon('phone')+' Afegir l’app al mòbil','btn secondary')}${actionBtn('about',icon('info')+' Sobre aquesta app','btn ghost')}${actionBtn('logout',icon('logout')+' Tancar sessió','btn ghost',state.uploading?'disabled':'')}</div><p class="hint" style="margin-top:25px">Versió ${APP_VERSION} · Sessió fins al ${esc(state.session?.expiresAt?dateLabel(state.session.expiresAt.slice(0,10)):'—')}</p>`);}
@@ -372,7 +386,7 @@ window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.insta
 window.addEventListener('offline',()=>{state.verified=false;forgetImages();state.gallery=[];if(modal.open&&!state.uploading)modal.close();render();});
 window.addEventListener('online',()=>refresh());
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.session&&!state.privacy&&!state.uploading)refresh(false);});
-window.addEventListener('storage',e=>{if(e.key===SESSION_KEY){const s=read(SESSION_KEY);if(!s||s.token!==state.session?.token){clearLocal();state.error='La sessió ha canviat en una altra pestanya. Torna a entrar.';render();}}});
+window.addEventListener('storage',e=>{if(e.key!==SESSION_KEY||e.storageArea!==localStorage)return;const shared=storedValue(SESSION_KEY);if(e.newValue!==shared)return;const incoming=parseStored(e.newValue),current=state.session;if(current&&usableSession(incoming)&&incoming.cacheKey===current.cacheKey){state.session=incoming;return;}if(current?.cacheKey)remove(PREFIX+'data:'+current.cacheKey);resetSessionState();state.error=e.newValue===null?'La sessió s’ha tancat en una altra pestanya. Torna a entrar.':'La sessió ha canviat en una altra pestanya. Torna a entrar.';render();});
 window.addEventListener('beforeunload',e=>{if(state.uploading){e.preventDefault();e.returnValue='';}});
 setInterval(()=>{if(state.session&&!usableSession(state.session)){clearLocal();state.error='La sessió ha caducat. Torna a entrar.';render();}},30000);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});

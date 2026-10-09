@@ -1,6 +1,6 @@
 # CF Vilajuïga · Guia de l’app
 
-PWA en català, frontend `4.0.0` i backend Apps Script `3.0.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
+PWA en català, frontend `4.0.1` i backend Apps Script `3.0.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
 
 ## Funcions
 
@@ -34,21 +34,17 @@ Rols:
 
 El servidor torna a comprovar usuari, rol, activació i privacitat a cada petició. Quan queden menys de set dies, la sessió es renova automàticament. Revocar sessions incrementa `sessio_epoch` i invalida tots els dispositius d’aquell usuari.
 
-## Desplegament 4.0.0
+## Desplegament 4.0.1
 
-Aquest canvi substitueix el login anterior i invalida les sessions existents. Cal respectar aquest ordre perquè GitHub Pages publica el frontend automàticament en fer `push`:
+Aquesta versió corregeix la coordinació de sessions i intents d’autenticació al frontend. És compatible amb el backend Apps Script `3.0.0` i no requereix tornar-lo a desplegar.
 
-1. Fes una còpia del Sheet real.
-2. Substitueix `backend/Code.gs` i `backend/appsscript.json` al projecte Apps Script.
-3. Executa `installBackend()`. Migra `03_USUARIS`, crea `07_INVITACIONS`, elimina `login_mode` i afegeix `invite_ttl_hours`.
-4. Executa temporalment una funció que cridi `adminInvite('+34XXXXXXXXX')` per obtenir la primera invitació d’administració.
-5. A **Gestiona els desplegaments → Edita → Nova versió**, publica el backend conservant la mateixa URL `/exec`.
-6. Comprova `API_URL?action=health`: ha de retornar `version: "3.0.0"` i `configured: true`.
-7. Prova la invitació, calendari, marcador, pujada, visualització, descàrrega i eliminació amb dades reals.
-8. Publica el frontend `4.0.0` a GitHub Pages.
-9. Tanca totes les pestanyes i l’app instal·lada abans de tornar-la a obrir perquè s’activi el service worker nou.
+1. Executa les quatre suites locals i revisa el diff.
+2. Comprova que el backend publicat continua retornant `version: "3.0.0"` i `configured: true` a l’acció `health`.
+3. Prova la invitació, consentiment, renovació, logout, galeria i cromos en un entorn de validació.
+4. Publica el frontend `4.0.1` a GitHub Pages només després de l’aprovació final.
+5. Recarrega les pestanyes que ja estiguessin obertes i torna a obrir l’app instal·lada. El service worker `4.0.1` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
 
-No publiquis el frontend `4.0.0` mentre el backend públic continuï a `2.x`: l’acció `redeemInvite` encara no existirà.
+No publiquis el frontend `4.0.1` mentre el backend públic continuï a `2.x`: l’acció `redeemInvite` encara no existirà.
 
 ## Administració
 
