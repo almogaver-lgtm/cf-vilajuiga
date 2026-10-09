@@ -1,6 +1,6 @@
 # CF Vilajuïga · Guia de l’app
 
-PWA en català, frontend `4.0.1` i backend Apps Script `3.0.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
+PWA en català, frontend `4.0.2` i backend Apps Script `3.0.1`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
 
 ## Funcions
 
@@ -34,17 +34,18 @@ Rols:
 
 El servidor torna a comprovar usuari, rol, activació i privacitat a cada petició. Quan queden menys de set dies, la sessió es renova automàticament. Revocar sessions incrementa `sessio_epoch` i invalida tots els dispositius d’aquell usuari.
 
-## Desplegament 4.0.1
+## Desplegament 4.0.2 / backend 3.0.1
 
-Aquesta versió corregeix la coordinació de sessions i intents d’autenticació al frontend. És compatible amb el backend Apps Script `3.0.0` i no requereix tornar-lo a desplegar.
+Aquesta versió redueix les operacions de Drive en retrats i miniatures, evita lectures innecessàries en galeries buides i reutilitza imatges privades només en memòria després de revalidar-ne la visibilitat. No modifica l’esquema de dades.
 
 1. Executa les quatre suites locals i revisa el diff.
-2. Comprova que el backend publicat continua retornant `version: "3.0.0"` i `configured: true` a l’acció `health`.
-3. Prova la invitació, consentiment, renovació, logout, galeria i cromos en un entorn de validació.
-4. Publica el frontend `4.0.1` a GitHub Pages només després de l’aprovació final.
-5. Recarrega les pestanyes que ja estiguessin obertes i torna a obrir l’app instal·lada. El service worker `4.0.1` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
+2. Publica primer el backend `3.0.1` com una nova versió del desplegament Apps Script existent, conservant la mateixa URL `/exec`.
+3. Comprova que `health` retorna `version: "3.0.1"` i `configured: true`, sense consultar dades privades.
+4. Prova invitació, consentiment, renovació, logout, galeria i cromos en un entorn de validació.
+5. Publica el frontend `4.0.2` a GitHub Pages només després de l’aprovació final.
+6. Recarrega les pestanyes ja obertes i torna a obrir l’app instal·lada. El service worker `4.0.2` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
 
-No publiquis el frontend `4.0.1` mentre el backend públic continuï a `2.x`: l’acció `redeemInvite` encara no existirà.
+El frontend `4.0.2` continua sent funcional amb el backend `3.0.0`, però les reduccions d’operacions de Drive requereixen publicar el backend `3.0.1`.
 
 ## Administració
 

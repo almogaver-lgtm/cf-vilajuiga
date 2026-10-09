@@ -1,5 +1,5 @@
 /** CF VILAJUÏGA — Backend, Apps Script V8. No secrets in this source. */
-const APP = Object.freeze({version:'3.0.0', portraitLimit:409600, portraitDimension:1200, usersTTL:180, bodyLimit:2400000,
+const APP = Object.freeze({version:'3.0.1', portraitLimit:409600, portraitDimension:1200, usersTTL:180, bodyLimit:2400000,
   thumbLimit:122880, maxPhotosPerBatch:6, privacyText:
   "Aquesta aplicació és d'ús privat per a les famílies de l'equip i pot contenir fotografies de menors. En accedir-hi et compromets a no publicar ni redistribuir les fotografies fora del grup sense l'autorització corresponent.",
   downloadNotice:"Ús exclusivament privat i familiar. No publiquis aquesta fotografia a xarxes socials ni la comparteixis fora del grup sense autorització."});
@@ -42,12 +42,16 @@ function doGet(e) {
   return json_({ok:false,error:{code:'UNKNOWN_ACTION',message:'Acció no disponible.'}});
 }
 function doPost(e) {
+  const started=Date.now();
   try {
     need_(e && e.postData && typeof e.postData.contents==='string','BAD_REQUEST','Cal un cos JSON.');
     need_(e.postData.contents.length<=APP.bodyLimit,'PAYLOAD_TOO_LARGE','Petició massa gran.');
     let p; try { p=JSON.parse(e.postData.contents); } catch(_) { fail_('BAD_JSON','JSON no vàlid.'); }
     need_(p && typeof p==='object' && !Array.isArray(p),'BAD_REQUEST','Petició no vàlida.');
-    return json_({ok:true,data:inRequest_(()=>dispatch_(p))});
+    const data=inRequest_(()=>dispatch_(p));
+    if(p.diagnostics===true&&['bootstrap','getPlayerPortraits','listPhotos','getThumbnails'].includes(p.action))
+      data.diagnostics={server_ms:Math.max(0,Date.now()-started)};
+    return json_({ok:true,data});
   } catch(e) {
     // Do not log request bodies, tokens, phone numbers, image data or Google error details.
     return json_({ok:false,error:{code:e.apiCode || 'INTERNAL_ERROR',message:e.apiCode ? e.message : 'Error intern. Torna-ho a provar.'}});
@@ -302,7 +306,10 @@ function logout_(p,a,c) {
   return {loggedOut:true};
 }
 function match_(id,admin) {
-  const m=unique_(rows_('01_PARTITS'),'partit_id',id_(id));
+  return matchFrom_(rows_('01_PARTITS'),id,admin);
+}
+function matchFrom_(matches,id,admin) {
+  const m=unique_(matches,'partit_id',id_(id));
   need_(m && (admin || bool_(m.visible)),'NOT_FOUND','Partit no disponible.'); return m;
 }
 function matchPublic_(m) {
@@ -356,15 +363,13 @@ function playerFolder_(create) {
 }
 function playerPortraits_(p,a,c) {
   need_(Array.isArray(p.jugador_ids)&&p.jugador_ids.length<=6&&new Set(p.jugador_ids).size===p.jugador_ids.length,'VALIDATION','Màxim sis retrats per petició.');
-  const players=rows_('05_JUGADORS');
+  const players=rows_('05_JUGADORS');let folder=null;
   return {items:p.jugador_ids.map(id=>{
     try {
       const j=unique_(players,'jugador_id',id_(id));
       need_(j&&bool_(j.actiu)&&(safeFalse_(j.no_mostrar)||a.user.rol==='admin'&&p.include_hidden===true)&&j.foto_id&&j.foto_drive_file_id,'NOT_FOUND','Retrat no disponible.');
-      const file=DriveApp.getFileById(j.foto_drive_file_id),folder=playerFolder_(false);assertPrivate_(file);
-      need_(folder&&!file.isTrashed()&&file.getMimeType()==='image/jpeg'&&file.getName()===j.jugador_id+'_'+uuid_(j.foto_id)+'.jpg','NOT_FOUND','Retrat no disponible.');
-      const parents=file.getParents();let found=false;while(parents.hasNext())if(parents.next().getId()===folder.getId())found=true;
-      need_(found&&file.getSize()<=APP.portraitLimit,'NOT_FOUND','Retrat no disponible.');
+      if(!folder)folder=playerFolder_(false);need_(folder,'NOT_FOUND','Retrat no disponible.');
+      const file=privateImageFile_(j.foto_drive_file_id,folder,j.jugador_id+'_'+uuid_(j.foto_id)+'.jpg',APP.portraitLimit);
       const bytes=file.getBlob().getBytes();jpegBytes_(bytes,APP.portraitLimit,APP.portraitDimension);
       const base64=Utilities.base64Encode(bytes);
       return {ok:true,jugador_id:id,retrat_version:j.foto_id,base64};
@@ -462,10 +467,12 @@ function blocked_(f,players) {
   return ids.some(id=>{const j=unique_(players,'jugador_id',id);return !j||!safeFalse_(j.no_mostrar);});
 }
 function canSee_(f,a,p,players) { return !bool_(f.eliminat) && safeFalse_(f.eliminat) && (!blocked_(f,players)||(a.user.rol==='admin'&&p.include_hidden===true)); }
-function photo_(p,a) {
-  const f=unique_(rows_('04_FOTOS'),'foto_id',uuid_(p.foto_id));
-  need_(f && canSee_(f,a,p,rows_('05_JUGADORS')),'NOT_FOUND','Fotografia no disponible.');
-  match_(f.partit_id,a.user.rol==='admin'&&p.include_hidden===true); return f;
+function photo_(p,a,photos,players,matches) {
+  const f=unique_(photos||rows_('04_FOTOS'),'foto_id',uuid_(p.foto_id)),playerRows=players||rows_('05_JUGADORS');
+  need_(f && canSee_(f,a,p,playerRows),'NOT_FOUND','Fotografia no disponible.');
+  if(matches)matchFrom_(matches,f.partit_id,a.user.rol==='admin'&&p.include_hidden===true);
+  else match_(f.partit_id,a.user.rol==='admin'&&p.include_hidden===true);
+  return f;
 }
 function photoPublic_(f,admin,players) {
   return {foto_id:f.foto_id,partit_id:f.partit_id,mime_type:f.mime_type,bytes:f.bytes,amplada:f.amplada,alcada:f.alcada,
@@ -474,27 +481,34 @@ function photoPublic_(f,admin,players) {
 }
 function listPhotos_(p,a,c) {
   const admin=a.user.rol==='admin'; match_(p.partit_id,admin&&p.include_hidden===true);
+  const limit=p.limit===undefined?30:p.limit;need_(Number.isInteger(limit)&&limit>=1&&limit<=50,'VALIDATION','Límit entre 1 i 50.');
+  const candidates=rows_('04_FOTOS').filter(f=>f.partit_id===p.partit_id&&!bool_(f.eliminat)&&safeFalse_(f.eliminat));
+  if(!candidates.length){need_(!p.after,'INVALID_CURSOR','La galeria ha canviat. Torna a carregar-la.');return {fotos:[],nextCursor:null};}
   const players=rows_('05_JUGADORS');
-  const all=rows_('04_FOTOS').filter(f=>f.partit_id===p.partit_id&&canSee_(f,a,p,players))
+  const all=candidates.filter(f=>canSee_(f,a,p,players))
     .sort((x,y)=>String(x.pujat_at).localeCompare(String(y.pujat_at))||String(x.foto_id).localeCompare(String(y.foto_id)));
   let start=0;
   if(p.after) { start=all.findIndex(f=>f.foto_id===p.after)+1;need_(start>0,'INVALID_CURSOR','La galeria ha canviat. Torna a carregar-la.'); }
-  const limit=p.limit===undefined?30:p.limit;need_(Number.isInteger(limit)&&limit>=1&&limit<=50,'VALIDATION','Límit entre 1 i 50.');
   const selected=all.slice(start,start+limit);
   return {fotos:selected.map(f=>photoPublic_(f,admin,players)),nextCursor:start+limit<all.length?selected[selected.length-1].foto_id:null};
 }
-function privateFile_(id,matchId,expectedName) {
-  // Follow recorded IDs only, verify exact private folder/name/mime before returning bytes.
-  const file=DriveApp.getFileById(id), folder=matchFolder_(matchId,false);
-  need_(folder && !file.isTrashed() && file.getMimeType()==='image/jpeg' && file.getName()===expectedName,'NOT_FOUND','Fitxer no disponible.');
-  assertPrivate_(file); const parents=file.getParents(); let found=false;
-  while(parents.hasNext()) if(parents.next().getId()===folder.getId()) found=true;
-  need_(found,'NOT_FOUND','Fitxer fora de la carpeta prevista.'); return file;
+function privateImageFile_(id,folder,expectedName,maxBytes) {
+  // One Drive metadata request checks ACL, location and immutable file properties.
+  const meta=Drive.Files.get(id,{fields:'id,title,mimeType,fileSize,labels,parents,permissions'}),permissions=meta.permissions||[];
+  need_(permissions.length>0&&permissions.every(permission=>permission.role==='owner'),'DRIVE_NOT_PRIVATE','La carpeta o el fitxer té permisos compartits. Revisa Drive.');
+  need_(!(meta.labels&&meta.labels.trashed)&&meta.mimeType==='image/jpeg'&&meta.title===expectedName,'NOT_FOUND','Fitxer no disponible.');
+  need_((meta.parents||[]).some(parent=>parent.id===folder.getId()),'NOT_FOUND','Fitxer fora de la carpeta prevista.');
+  const size=Number(meta.fileSize);need_(Number.isSafeInteger(size)&&size>=0&&(maxBytes===undefined||size<=maxBytes),'PAYLOAD_TOO_LARGE','Fitxer massa gran.');
+  return DriveApp.getFileById(id);
+}
+function privateFile_(id,matchId,expectedName,maxBytes) {
+  // Follow recorded IDs only and validate the private parent before reading file metadata.
+  const folder=matchFolder_(matchId,false);need_(folder,'NOT_FOUND','Fitxer no disponible.');
+  return privateImageFile_(id,folder,expectedName,maxBytes);
 }
 function mediaBytes_(f,thumb,c) {
   const id=thumb?f.thumb_file_id:f.drive_file_id;
-  const file=privateFile_(id,f.partit_id,f.foto_id+(thumb?'_thumb.jpg':'_photo.jpg'));
-  need_(file.getSize()<=(thumb?APP.thumbLimit:c.upload_max_bytes),'PAYLOAD_TOO_LARGE','Fitxer massa gran.');
+  const file=privateFile_(id,f.partit_id,f.foto_id+(thumb?'_thumb.jpg':'_photo.jpg'),thumb?APP.thumbLimit:c.upload_max_bytes);
   return {foto_id:f.foto_id,mime_type:'image/jpeg',base64:Utilities.base64Encode(file.getBlob().getBytes()),filename:f.foto_id+'.jpg'};
 }
 function media_(p,a,c,thumb,download) {
@@ -512,8 +526,9 @@ function media_(p,a,c,thumb,download) {
 function thumbnails_(p,a,c) {
   need_(Array.isArray(p.foto_ids)&&p.foto_ids.length>0&&p.foto_ids.length<=APP.maxPhotosPerBatch,'VALIDATION','Demana entre 1 i 6 miniatures.');
   const seen={};p.foto_ids.forEach(id=>{uuid_(id);need_(!seen[id],'VALIDATION','ID repetit.');seen[id]=true;});
+  let photos,players,matches,readError;try{photos=rows_('04_FOTOS');players=rows_('05_JUGADORS');matches=rows_('01_PARTITS');}catch(e){readError=e;}
   return {items:p.foto_ids.map(id=>{
-    try { const f=photo_({...p,foto_id:id},a);return {...mediaBytes_(f,true,c),ok:true}; }
+    try { if(readError)throw readError;const f=photo_({...p,foto_id:id},a,photos,players,matches);return {...mediaBytes_(f,true,c),ok:true}; }
     catch(e) { return {foto_id:id,ok:false,error:{code:e.apiCode||'INTERNAL_ERROR',message:e.apiCode?e.message:'No s’ha pogut recuperar la miniatura.'}}; }
   })};
 }

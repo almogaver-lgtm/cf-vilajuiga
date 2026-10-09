@@ -1,4 +1,4 @@
-# CF Vilajuïga · Backend Apps Script 3.0.0
+# CF Vilajuïga · Backend Apps Script 3.0.1
 
 Backend privat basat en Google Apps Script, Sheets i Drive. No hi ha secrets, telèfons reals ni fotografies al repositori.
 
@@ -53,6 +53,8 @@ La resposta sempre és una d’aquestes formes:
 {"ok":false,"error":{"code":"FORBIDDEN","message":"No tens permís per fer aquesta acció."}}
 ```
 
+Les lectures `bootstrap`, `getPlayerPortraits`, `listPhotos` i `getThumbnails` accepten opcionalment `"diagnostics": true`. La resposta afegeix només `diagnostics.server_ms`; no registra ni retorna tokens, telèfons o contingut privat addicional. Serveix per comparar el mateix escenari abans i després d’un desplegament autoritzat.
+
 ## Invitacions i sessions
 
 - Codi aleatori de quatre xifres, d’un sol ús i caducitat configurable d’1 a 168 hores.
@@ -65,6 +67,7 @@ La resposta sempre és una d’aquestes formes:
 ## Fotografies
 
 - Drive privat, sense URL pública ni IDs de Drive exposats al client.
+- Les metadades v2 de Drive agrupen en una sola consulta per fitxer la comprovació de permisos, nom, MIME, mida, paperera i carpeta pare.
 - JPEG màxim de 1,5 MiB i 1600 px; miniatura màxima de 120 KiB i 480 px.
 - Cada pujada exigeix etiquetes de jugadors o `sense_jugadors: true`.
 - Les restriccions `no_mostrar` s’apliquen retroactivament a fotos i retrats.

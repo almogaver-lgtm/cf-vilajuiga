@@ -2,8 +2,8 @@
 
 PWA privada per a les famílies del CF Vilajuïga: calendari, resultats, cròniques, cromos i fotografies de la temporada 2026/27.
 
-- Frontend `4.0.1`: JavaScript natiu, PWA estàtica i GitHub Pages.
-- Backend `3.0.0`: Google Apps Script, Sheets i Drive privat.
+- Frontend `4.0.2`: JavaScript natiu, PWA estàtica i GitHub Pages.
+- Backend `3.0.1`: Google Apps Script, Sheets i Drive privat.
 - Accés: invitacions de quatre xifres, d’un sol ús i amb caducitat.
 - Privacitat: permisos comprovats al servidor, etiquetatge obligatori de fotos i cap imatge privada al repositori o al service worker.
 

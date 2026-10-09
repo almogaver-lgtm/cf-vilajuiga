@@ -1,57 +1,66 @@
-# Rendiment · CF Vilajuïga 4.0.0 / backend 3.0.0
+# Rendiment · CF Vilajuïga 4.0.2 / backend 3.0.1
 
-Les optimitzacions de lectura de la versió 2.2.0 es mantenen a 3.0.0. La versió 3.0.0 afegeix invitacions d’un sol ús, renovació de sessió, dades de Sheet més tolerants i etiquetatge obligatori de fotografies.
+La versió 3.0.1 redueix operacions de Drive sense treure controls d'accés. La versió 4.0.2 reutilitza retrats i miniatures en memòria després de revalidar-ne la visibilitat; les imatges privades no es desen a `localStorage`, Cache Storage ni al service worker.
 
-## Mesures amb dades sintètiques
+## Mesura reproduïble amb dades sintètiques
 
-Escenari: una família amb consentiment vigent demana sis miniatures autoritzades del mateix partit. S'han comptat les crides explícites del codi als dobles de Sheets i Drive; no són mil·lisegons ni una mesura de les optimitzacions internes de Google.
+`npm run test:performance` executa quatre escenaris amb Sheets i Drive simulats:
 
-| Operació per petició | Abans, backend 2.1.0 | Ara, backend 2.2.0 |
+- `bootstrap`;
+- `getPlayerPortraits` amb dos retrats;
+- `listPhotos` en un partit sense fotografies;
+- `getThumbnails` amb sis miniatures.
+
+Els resultats són comptadors de crides als dobles locals, no mil·lisegons ni latència real de Google.
+
+| Escenari | Mesura | Backend 3.0.0 | Backend 3.0.1 |
+|---|---|---:|---:|
+| `bootstrap` | Obertures / lectures de dades / capçaleres | 1 / 4 / 4 | 1 / 4 / 4 |
+| Dos retrats | Operacions Drive instrumentades totals | 28 | 14 |
+| Dos retrats | Metadades / ACL / parents / blobs | 8 / 12 / 2 / 2 | 0 / 6 / 0 / 2 |
+| Dos retrats | Consultes agrupades `Drive.Files.get` | 0 | 2 |
+| Galeria buida | Lectures de dades / capçaleres | 4 / 5 | 3 / 4 |
+| Sis miniatures | Operacions Drive instrumentades totals | 68 | 26 |
+| Sis miniatures | Metadades / ACL / parents / blobs | 24 / 24 / 6 / 6 | 0 / 6 / 0 / 6 |
+| Sis miniatures | Consultes agrupades `Drive.Files.get` | 0 | 6 |
+
+El total Drive suma les cerques de carpeta, lectures de carpeta i fitxer, metadades, ACL, parents, blobs i la consulta agrupada. La reducció prové de consultar les metadades v2 una vegada per fitxer; no s'han eliminat les comprovacions de compartició, paperera, MIME, nom, mida o carpeta pare.
+
+Al navegador simulat:
+
+| Operació després d'una navegació entre seccions | 4.0.1 | 4.0.2 |
 |---|---:|---:|
-| `SpreadsheetApp.openById` | 20 | 1 |
-| Lectures de files amb `getValues` | 20 | 5 |
-| Lectures de capçaleres amb `getValues` | 20 | 5 |
-| Cerques de la subcarpeta del partit | 6 | 1 |
-| Miniatures autoritzades retornades | 6 | 6 |
+| Tornar a una galeria sense canvis | torna a descarregar la miniatura | reutilitza el mateix `blob:` després de `listPhotos` |
+| Tornar als cromos sense canvis | torna a descarregar el retrat | reutilitza el mateix `blob:` després de `bootstrap` |
 
-La referència anterior és `backend/Code.gs` del commit `52d6fc5e313b7203999181a08fea4cbce87a9174`. Les proves es poden reproduir sense cap telèfon real ni credencial Google:
+Les respostes tardanes continuen cancel·lades amb la generació de vista i la identitat de sessió.
 
-```bash
-npm run test:backend
-npm run test:performance
-# Comparació amb una còpia local del codi anterior:
-node backend/tests/performance.cjs /ruta/al/Code-anterior.gs
+## Mesura opcional del backend real
+
+Les lectures `bootstrap`, `getPlayerPortraits`, `listPhotos` i `getThumbnails` accepten `"diagnostics": true`. La resposta incorpora:
+
+```json
+{"diagnostics":{"server_ms":1234}}
 ```
 
-Altres diferències verificades al navegador amb API simulada:
+El diagnòstic no escriu logs ni inclou tokens, telèfons o dades personals addicionals. Només s'ha d'utilitzar en una prova autoritzada i comparable, amb el mateix compte, dispositiu, xarxa i conjunt sintètic o controlat.
 
-| Operació | Abans | Ara |
-|---|---|---|
-| Entrar amb consentiment vigent | `redeemInvite` + `bootstrap` | `redeemInvite` amb dades inicials: 1 petició |
-| Primer accés amb acceptació | `redeemInvite` + `acceptPrivacy` + `bootstrap` | 2 peticions; cap dada abans d'acceptar |
-| Actualitzar l'àlbum amb retrats vigents | Descarrega de nou tots els retrats | Reutilitza els retrats que el servidor confirma autoritzats |
-| Carregar més de sis retrats o miniatures | Paquets successius | Fins a 2 paquets simultanis, de 6 imatges cadascun |
+No s'ha contactat el servei real en aquesta implementació. Per tant, no s'afirma que els 9,63 segons observats baixin per sota de 3 segons fins que el backend 3.0.1 es publiqui i es mesuri. Apps Script, Drive i la mida/base64 de les imatges continuen imposant latència externa.
 
-## Controls que es mantenen
+## Controls preservats
 
-- Cada petició HTTP torna a llegir usuaris i permisos, també bootstrap. Les instantànies de files i carpetes només viuen durant aquella petició; no hi ha una còpia compartida entre peticions que pugui ocultar una revocació.
-- Les files retornades són còpies. Desar una pestanya invalida la seva instantània, i els errors descarten el context de la petició.
-- Cada fitxer conserva els controls de privacitat, nom, parent, MIME i mida. Els retrats es validen directament en bytes, inclosa l'absència de metadades, abans de passar-los a base64.
-- Un retrat només es reutilitza amb `fresh_permissions=true`, consentiment vigent, mateix rol i vista, i jugador i versió presents a la resposta actual del servidor. Un backend antic provoca la recàrrega conservadora.
-- Es descarten retrats modificats o retirats, i totes les imatges en sortir de la secció, perdre connexió, fallar la revalidació o tancar sessió. Les respostes tardanes no poden tornar a inserir-les.
-- Les fotos no s'emmagatzemen a localStorage ni a Cache Storage. El service worker només guarda l'app estàtica.
-- Les escriptures conserven el bloqueig, `request_id`, comprovació de versió i recuperació d'auditoria. La cua de pujades continua sent seqüencial; la concurrència nova només afecta lectures d'imatges.
-
-## Validació i límits
-
-41 proves del servidor, 16 proves de domini i càrrega concurrent, i proves de navegador amb consentiment, accés combinat i antic, edició, pujades repetides, rols, revocació, retrats modificats/restringits, errors de connexió, cancel·lació de càrregues i service worker offline.
-
-No s'ha mesurat el temps d'entrada ni de galeria amb un compte real. Les proves públiques del servei des de l'entorn de desenvolupament no permeten atribuir tota la latència a Sheets o Drive. Després de publicar el backend, cal comparar aquestes operacions al mateix mòbil i connexió: entrada, obertura de l'àlbum, actualització sense canvis, galeria i desament d'un cromo. Apps Script i Drive continuen formant part del recorregut; no s'afirma un percentatge de velocitat garantit.
+- Cada petició autentica de nou l'usuari actiu, el rol, la sessió i el consentiment.
+- `no_mostrar`, eliminacions, partits ocults i accés administratiu continuen comprovats al servidor.
+- Cada fitxer valida permisos privats, paperera, nom, MIME, mida i carpeta pare abans de llegir-ne els bytes.
+- Els JPEG continuen validant mida, dimensions, estructura i absència de metadades sensibles.
+- Canviar de compte, tancar sessió, quedar offline o fallar la revalidació revoca tots els URL `blob:`.
+- Les miniatures retirades durant `listPhotos` es revoquen abans de poder-se tornar a mostrar.
+- Les escriptures, bloquejos, `request_id` i auditories no han canviat.
 
 ## Activació
 
-1. Substitueix `Code.gs` per [backend/Code.gs](backend/Code.gs), desa'l i executa `installBackend`. És repetible i conserva les dades existents.
-2. A **Implementar → Gestionar implementaciones → llapis**, selecciona **Versión: Nueva versión** i prem **Implementar**. Conserva la mateixa URL `/exec`.
-3. Tanca totes les pestanyes i l'app instal·lada, i torna-la a obrir. El servei públic ha d'indicar `version: 3.0.0`.
-
-El manifest d'Apps Script no canvia. No cal moure fotos, modificar el Sheet ni crear un altre desplegament.
+1. Revisa el diff i executa les quatre suites.
+2. Publica `backend/Code.gs` com una nova versió Apps Script amb la mateixa URL `/exec`; no cal migrar el Sheet ni Drive.
+3. Verifica `health`: backend `3.0.1`, `configured: true`.
+4. Mesura els quatre escenaris amb `diagnostics: true` només amb autorització.
+5. Publica el frontend `4.0.2` i comprova la cache PWA `v4.0.2`.
