@@ -3,6 +3,7 @@ import {playerCard,POSITIONS} from './player-cards.mjs';
 import {mediaBatches} from './media-batches.mjs';
 import {LEAGUE,CLUBS,clubFor,clubMapsUrl} from './league.mjs';
 import {apiPost,requestId,prepareUpload,jpegBlob} from './api-client.mjs';
+import {createPortraitEditor} from './portrait-editor.mjs';
 import {esc,sortedMatches,nextMatch,lastMatch,opponent,result,dateLabel,mapsUrl,filterMatches,icsForMatch,usableSession} from './domain.mjs';
 const $=id=>document.getElementById(id);
 const root=$('app'),modal=$('modal');
@@ -15,10 +16,10 @@ const write=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true;}c
 function remove(k){try{localStorage.removeItem(k);}catch{}}
 function clearStored(){try{Object.keys(localStorage).filter(k=>k.startsWith(PREFIX)).forEach(k=>localStorage.removeItem(k));}catch{}}
 const stored=read(SESSION_KEY);
-let sessionGeneration=0,authAttemptGeneration=0;
+let sessionGeneration=0,authAttemptGeneration=0,playerPortraitGeneration=0;
 const state={session:usableSession(stored)?stored:null,data:null,view:'home',filter:'all',verified:false,loading:false,error:'',loginBusy:false,
   privacy:null,authUser:null,galleryMatch:'',gallery:[],galleryNext:null,galleryLoading:false,galleryCacheIds:new Set(),includeHidden:false,thumbs:new Map(),images:new Set(),
-  queue:null,uploading:false,installEvent:null,modalMatch:null,editMode:'result',viewerPhoto:null,viewerUrl:null,viewGeneration:0,portraits:new Map(),portraitsVerified:false,portraitLoads:new Set(),playerDraft:null,
+  queue:null,uploading:false,installEvent:null,modalMatch:null,editMode:'result',viewerPhoto:null,viewerUrl:null,viewGeneration:0,portraits:new Map(),portraitsVerified:false,portraitLoads:new Set(),playerDraft:null,playerPreviewUrl:null,playerPortraitEditor:null,playerPortraitPrepared:null,playerPortraitBackup:null,playerPortraitName:'',
   users:[],usersLoading:false,inviteMessage:''};
 if(!state.session)clearStored();else state.data=read(PREFIX+'data:'+state.session.cacheKey)?.data||null;
 const paths={home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18m-13 4h2m4 0h2m-8 3h2"/>',photos:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L6 21"/>',team:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m2-17a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5v2"/>',arrow:'<path d="M5 12h14m-6-6 6 6-6 6"/>',chevron:'<path d="m9 5 7 7-7 7"/>',map:'<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="2.5"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',close:'<path d="m6 6 12 12M6 18 18 6"/>',refresh:'<path d="M20 7v5h-5M4 17v-5h5m-4.7-2a8 8 0 0 1 13.2-6L20 7M4 17l2.5 3A8 8 0 0 0 19.7 14"/>',download:'<path d="M12 3v12m-5-5 5 5 5-5M4 15v6h16v-6"/>',upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 16v5h16v-5"/>',edit:'<path d="m16 3 5 5-12 12-6 1 1-6zM13 6l5 5"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15m-9 3v8m4-8v8"/>',logout:'<path d="M9 4H4v16h5m3-8h9m-4-4 4 4-4 4"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/>',ball:'<circle cx="12" cy="12" r="9"/><path d="m12 7 4 3-2 5h-4l-2-5zm0 0V3m4 7 5-1m-7 6 3 5m-7-5-3 5m1-10L3 9"/>',check:'<path d="m5 12 4 4L19 6"/>',phone:'<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/>'};
@@ -37,7 +38,8 @@ function releaseImage(url){if(!url)return;URL.revokeObjectURL(url);state.images.
 function forgetThumb(id){releaseImage(state.thumbs.get(id));state.thumbs.delete(id);}
 function forgetImages(){state.viewGeneration++;state.images.forEach(url=>URL.revokeObjectURL(url));state.images.clear();state.thumbs.clear();state.galleryCacheIds.clear();state.portraits.clear();state.portraitsVerified=false;state.portraitLoads.clear();state.viewerUrl=null;}
 function imageUrl(base64){const url=URL.createObjectURL(jpegBlob(base64));state.images.add(url);return url;}
-function resetSessionState(){sessionGeneration++;forgetImages();Object.assign(state,{session:null,data:null,authUser:null,privacy:null,verified:false,loading:false,loginBusy:false,queue:null,uploading:false,gallery:[],galleryNext:null,galleryMatch:'',galleryLoading:false,galleryCacheIds:new Set(),includeHidden:false,modalMatch:null,editMode:'result',viewerPhoto:null,viewerUrl:null,pendingEdit:null,pendingDownload:null,pendingDelete:null,privacyRequest:null,view:'home',filter:'all',playerDraft:null,playerPreviewUrl:null,portraitsVerified:false,users:[],usersLoading:false,inviteMessage:''});if(modal.open)modal.close();modal.replaceChildren();}
+function disposePlayerPortrait(){playerPortraitGeneration++;const editors=new Set([state.playerPortraitEditor,state.playerPortraitBackup?.editor]);editors.forEach(editor=>editor?.destroy());state.playerPortraitEditor=null;state.playerPortraitPrepared=null;state.playerPortraitBackup=null;state.playerPortraitName='';if(state.playerPreviewUrl){releaseImage(state.playerPreviewUrl);state.playerPreviewUrl=null;}}
+function resetSessionState(){sessionGeneration++;disposePlayerPortrait();forgetImages();Object.assign(state,{session:null,data:null,authUser:null,privacy:null,verified:false,loading:false,loginBusy:false,queue:null,uploading:false,gallery:[],galleryNext:null,galleryMatch:'',galleryLoading:false,galleryCacheIds:new Set(),includeHidden:false,modalMatch:null,editMode:'result',viewerPhoto:null,viewerUrl:null,pendingEdit:null,pendingDownload:null,pendingDelete:null,privacyRequest:null,view:'home',filter:'all',playerDraft:null,playerPreviewUrl:null,portraitsVerified:false,users:[],usersLoading:false,inviteMessage:''});if(modal.open)modal.close();modal.replaceChildren();}
 function clearLocal(){clearStored();resetSessionState();}
 function staleSessionError(){return Object.assign(new Error('La sessió ha canviat en una altra pestanya.'),{code:'STALE_SESSION'});}
 const sessionIdentity=()=>({cacheKey:state.session?.cacheKey||null,generation:sessionGeneration});
@@ -197,23 +199,64 @@ function playerDetails(id){const j=state.data.jugadors?.find(j=>j.jugador_id===i
 function playerEditor(id){
  if(!isAdmin()||!canWrite()||!state.data.features?.player_cards)return;
  if(state.playerDraft&&state.playerDraft.id!==id){toast('Acaba de guardar el cromo pendent abans d’editar-ne un altre.');return;}
+ disposePlayerPortrait();
  const j=state.data.jugadors?.find(j=>j.jugador_id===id)||{nom:'',dorsal:'',posicio:'',actualitzat_at:''};
- const pending=state.playerDraft?.payload,values=pending||j;
- openModal(id?'Editar cromo':'Nou cromo',`<form id="player-form" data-id="${esc(id||'')}" data-expected="${esc(pending?.expected_updated_at??j.actualitzat_at??'')}"><div class="form-field"><label for="player-name">Nom</label><input class="input" id="player-name" name="nom" maxlength="60" value="${esc(values.nom)}" placeholder="Nom del jugador" required><p class="hint">Nom de pila, sense cognoms.</p></div><div class="player-form-pair"><div class="form-field"><label for="player-jersey">Dorsal</label><input class="input" id="player-jersey" name="dorsal" type="number" min="0" max="99" step="1" value="${esc(values.dorsal??'')}"></div><div class="form-field"><label for="player-position">Posició</label><select class="input" id="player-position" name="posicio"><option value="">Per definir</option>${POSITIONS.map(p=>`<option ${p===values.posicio?'selected':''}>${p}</option>`).join('')}</select></div></div><div class="form-field"><label for="player-portrait">Retrat ${j.te_retrat?'nou (opcional)':'(opcional)'}</label><input class="input" id="player-portrait" name="retrat" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif"><p class="hint">Pots preparar la foto abans. Format vertical, retrat centrat. L’app la comprimeix i la desa en privat.</p></div><div class="player-live-preview" id="player-live-preview">${playerCard({...j,nom:values.nom||'El teu nom',dorsal:values.dorsal,posicio:values.posicio,te_retrat:false},{preview:true,season:state.data.config?.temporada})}</div>${j.no_mostrar?'<p class="venue-note">Aquest jugador té activada la restricció de fotografies. El cromo continuarà ocult per a les famílies.</p>':''}<p id="player-error" class="error-msg" role="alert" hidden></p><button type="submit" class="btn full">${state.playerDraft?'Reintentar el mateix cromo':'Guardar cromo'}</button></form>`);paintPortraits();
+ const pending=state.playerDraft?.payload,values=pending||j,locked=!!state.playerDraft;
+ openModal(id?'Editar cromo':'Nou cromo',`<form id="player-form" data-id="${esc(id||'')}" data-expected="${esc(pending?.expected_updated_at??j.actualitzat_at??'')}"><div class="form-field"><label for="player-name">Nom</label><input class="input" id="player-name" name="nom" maxlength="60" value="${esc(values.nom)}" placeholder="Nom del jugador" required><p class="hint">Nom de pila, sense cognoms.</p></div><div class="player-form-pair"><div class="form-field"><label for="player-jersey">Dorsal</label><input class="input" id="player-jersey" name="dorsal" type="number" min="0" max="99" step="1" value="${esc(values.dorsal??'')}"></div><div class="form-field"><label for="player-position">Posició</label><select class="input" id="player-position" name="posicio"><option value="">Per definir</option>${POSITIONS.map(p=>`<option ${p===values.posicio?'selected':''}>${p}</option>`).join('')}</select></div></div><div class="form-field portrait-field"><label for="player-portrait">Retrat ${j.te_retrat?'nou (opcional)':'(opcional)'}</label><input class="input" id="player-portrait" name="retrat" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" ${locked?'disabled':''}><p class="hint">Tria una foto i ajusta-la aquí. L’original només es processa en memòria i no es desa al dispositiu.</p><div class="portrait-ready-row"><span id="portrait-status" class="hint" role="status">${locked&&pending?.photo_base64?'Retrat preparat per reintentar.':'Cap retrat nou preparat.'}</span>${actionBtn('edit-portrait','Tornar a editar','btn secondary small',`${locked||!pending?.photo_base64?'hidden':''}`)}</div></div><section id="portrait-editor" class="portrait-editor" aria-label="Editor del retrat" hidden><p class="portrait-instructions">Arrossega per enquadrar. Fes pinça o utilitza el control per ampliar.</p><div class="portrait-stage"><canvas id="portrait-canvas" width="532" height="600" aria-label="Retall del retrat"></canvas><span>Àrea visible al cromo</span></div><label class="portrait-zoom" for="portrait-zoom">Zoom <input id="portrait-zoom" type="range" min="1" max="3" step="0.01" value="1"></label><div class="portrait-tools">${actionBtn('rotate-portrait-left','↶ 90°','btn ghost small')}${actionBtn('rotate-portrait-right','↷ 90°','btn ghost small')}${actionBtn('reset-portrait','Restablir','btn ghost small')}</div><div class="portrait-editor-actions">${actionBtn('cancel-portrait','Cancel·lar','btn ghost')}${actionBtn('apply-portrait','Aplicar','btn')}</div></section><div class="player-live-preview" id="player-live-preview">${playerCard({...j,nom:values.nom||'El teu nom',dorsal:values.dorsal,posicio:values.posicio,te_retrat:false},{preview:true,season:state.data.config?.temporada})}</div>${j.no_mostrar?'<p class="venue-note">Aquest jugador té activada la restricció de fotografies. El cromo continuarà ocult per a les famílies.</p>':''}<p id="player-error" class="error-msg" role="alert" hidden></p><button type="submit" class="btn full">${locked?'Reintentar el mateix cromo':'Guardar cromo'}</button></form>`);paintPortraits();
+ const form=$('player-form');
+ if(pending?.photo_base64){state.playerPortraitPrepared={photo_base64:pending.photo_base64,foto_id:pending.foto_id};state.playerPortraitName='Retrat pendent';state.playerPreviewUrl=imageUrl(pending.photo_base64);updatePlayerPreview(form);}
 }
-function updatePlayerPreview(form){if(state.playerDraft)return;const values=new FormData(form);$('player-live-preview').innerHTML=playerCard({nom:String(values.get('nom')||'El teu nom'),dorsal:values.get('dorsal'),posicio:values.get('posicio')},{preview:true,season:state.data.config?.temporada});const file=form.elements.retrat.files[0];if(state.playerPreviewUrl){URL.revokeObjectURL(state.playerPreviewUrl);state.images.delete(state.playerPreviewUrl);state.playerPreviewUrl=null;}if(file){const img=document.createElement('img');img.className='player-portrait';img.alt='Previsualització local del retrat';img.src=imageUrlFromFile(file);state.playerPreviewUrl=img.src;const frame=$('player-live-preview').querySelector('.card-photo');frame.querySelector('.card-silhouette').hidden=true;frame.appendChild(img);}}
-function imageUrlFromFile(file){const url=URL.createObjectURL(file);state.images.add(url);return url;}
+function setPortraitStatus(text,error=false){const status=$('portrait-status');if(status){status.textContent=text;status.classList.toggle('error-msg',error);}}
+function attachPlayerPortraitPreview(form){
+ const frame=form.querySelector('#player-live-preview .card-photo'),silhouette=frame?.querySelector('.card-silhouette');if(!frame)return;
+ if(state.playerPortraitBackup&&state.playerPortraitEditor){const canvas=document.createElement('canvas');canvas.width=266;canvas.height=300;canvas.className='player-portrait player-portrait-preview';canvas.setAttribute('aria-label','Previsualització del retall al cromo');state.playerPortraitEditor.drawTo(canvas);if(silhouette)silhouette.hidden=true;frame.appendChild(canvas);return;}
+ if(state.playerPreviewUrl){const img=document.createElement('img');img.className='player-portrait';img.alt='Previsualització local del retrat';img.src=state.playerPreviewUrl;if(silhouette)silhouette.hidden=true;frame.appendChild(img);}
+}
+function updatePlayerPreview(form){const preview=form.querySelector('#player-live-preview');if(!preview||!state.data)return;const values=new FormData(form);preview.innerHTML=playerCard({nom:String(values.get('nom')||'El teu nom'),dorsal:values.get('dorsal'),posicio:values.get('posicio')},{preview:true,season:state.data.config?.temporada});attachPlayerPortraitPreview(form);}
+function togglePortraitEditor(form,visible){const panel=form.querySelector('#portrait-editor'),edit=form.querySelector('[data-action="edit-portrait"]'),input=form.elements.retrat;panel.hidden=!visible;modal.classList.toggle('portrait-editing',visible);if(input)input.disabled=visible||!!state.playerDraft;if(edit){edit.hidden=visible||!state.playerPortraitEditor||!!state.playerDraft;edit.disabled=false;}updatePlayerPreview(form);}
+function portraitBackup(){return {editor:state.playerPortraitEditor,transform:state.playerPortraitEditor?.getTransform(),prepared:state.playerPortraitPrepared,previewUrl:state.playerPreviewUrl,name:state.playerPortraitName};}
+function cancelPlayerPortrait(form,announce=true){
+ const backup=state.playerPortraitBackup;if(!backup)return;playerPortraitGeneration++;
+ if(state.playerPortraitEditor!==backup.editor)state.playerPortraitEditor?.destroy();else if(backup.transform)state.playerPortraitEditor?.setTransform(backup.transform);
+ state.playerPortraitEditor=backup.editor;state.playerPortraitPrepared=backup.prepared;state.playerPreviewUrl=backup.previewUrl;state.playerPortraitName=backup.name;state.playerPortraitBackup=null;form.elements.retrat.value='';togglePortraitEditor(form,false);setPortraitStatus(state.playerPortraitPrepared?`${state.playerPortraitName||'Retrat'} preparat.`:'Cap retrat nou preparat.');if(announce)toast('Canvis del retrat cancel·lats.');
+}
+async function selectPlayerPortrait(form,file){
+ if(!file||state.playerDraft)return;if(state.playerPortraitBackup)cancelPlayerPortrait(form,false);
+ const identity=sessionIdentity(),generation=++playerPortraitGeneration,backup=portraitBackup(),canvas=form.querySelector('#portrait-canvas'),zoomInput=form.querySelector('#portrait-zoom'),input=form.elements.retrat,edit=form.querySelector('[data-action="edit-portrait"]');input.disabled=true;if(edit)edit.disabled=true;setPortraitStatus('Obrint la fotografia…');
+ let editor;
+ try{
+  editor=await createPortraitEditor(file,{canvas,zoomInput,onChange:()=>{if(state.playerPortraitEditor===editor&&state.playerPortraitBackup)updatePlayerPreview(form);}});
+  if(generation!==playerPortraitGeneration||!isCurrentSession(identity)||!form.isConnected){editor.destroy();return;}
+  state.playerPortraitBackup=backup;state.playerPortraitEditor=editor;state.playerPortraitName=file.name;togglePortraitEditor(form,true);setPortraitStatus('Ajusta l’enquadrament i prem Aplicar.');
+ }catch(e){editor?.destroy();if(generation!==playerPortraitGeneration||!isCurrentSession(identity))return;form.elements.retrat.value='';setPortraitStatus(e.message,true);}
+ finally{if(generation===playerPortraitGeneration&&form.isConnected&&!state.playerPortraitBackup){input.disabled=!!state.playerDraft;if(edit)edit.disabled=false;}}
+}
+function editPlayerPortrait(form){if(!state.playerPortraitEditor||state.playerPortraitBackup||state.playerDraft)return;state.playerPortraitBackup=portraitBackup();togglePortraitEditor(form,true);setPortraitStatus('Ajusta l’enquadrament i prem Aplicar.');}
+async function applyPlayerPortrait(form){
+ const editor=state.playerPortraitEditor,backup=state.playerPortraitBackup,panel=form.querySelector('#portrait-editor');if(!editor||!backup)return;
+ const identity=sessionIdentity(),generation=++playerPortraitGeneration,buttons=[...panel.querySelectorAll('button')];buttons.forEach(button=>button.disabled=true);setPortraitStatus('Preparant el JPEG privat…');
+ try{
+  const config={...state.data.config,image_max_dimension:Math.min(Number(state.data.config.portrait_max_dimension)||1200,1200),upload_max_bytes:Math.min(Number(state.data.config.portrait_max_bytes)||409600,409600)};
+  const exported=await editor.exportJpeg({maxBytes:config.upload_max_bytes});if(generation!==playerPortraitGeneration||!isCurrentSession(identity)||state.playerPortraitEditor!==editor)return;
+  const prepared=await prepareUpload(exported.blob,{config});if(generation!==playerPortraitGeneration||!isCurrentSession(identity)||state.playerPortraitEditor!==editor)return;
+  if(backup.editor&&backup.editor!==editor)backup.editor.destroy();if(backup.previewUrl)releaseImage(backup.previewUrl);
+  state.playerPortraitPrepared={photo_base64:prepared.photo_base64,foto_id:prepared.foto_id};state.playerPreviewUrl=imageUrl(prepared.photo_base64);state.playerPortraitBackup=null;form.elements.retrat.value='';togglePortraitEditor(form,false);setPortraitStatus(`${state.playerPortraitName||'Retrat'} preparat.`);
+ }catch(e){if(generation===playerPortraitGeneration&&isCurrentSession(identity)&&state.playerPortraitEditor===editor)setPortraitStatus(e.message,true);}
+ finally{if(generation===playerPortraitGeneration&&panel.isConnected)buttons.forEach(button=>button.disabled=false);}
+}
 async function savePlayer(form){
  if(!isAdmin()||!canWrite())return;const identity=sessionIdentity(),existing=state.playerDraft,values=new FormData(form),button=form.querySelector('[type=submit]');
  const draft={action:'savePlayer',jugador_id:existing?.payload.jugador_id||form.dataset.id||requestId(),nom:String(values.get('nom')||'').trim(),dorsal:values.get('dorsal')===''?'':Number(values.get('dorsal')),posicio:values.get('posicio'),expected_updated_at:form.dataset.expected};
- const signature=JSON.stringify(draft),file=form.elements.retrat.files[0];
- if(existing&&(existing.signature!==signature||file)){ $('player-error').hidden=false;$('player-error').textContent='Hi ha un desament pendent. Reintenta els mateixos valors abans de canviar-los.';return;}
+ const signature=JSON.stringify(draft),prepared=state.playerPortraitPrepared,error=$('player-error');
+ if(state.playerPortraitBackup){error.hidden=false;error.textContent='Aplica o cancel·la l’enquadrament abans de guardar el cromo.';return;}
+ if(form.elements.retrat.files[0]&&!prepared){error.hidden=false;error.textContent='Espera que s’obri la fotografia i aplica l’enquadrament.';return;}
+ if(existing&&existing.signature!==signature){error.hidden=false;error.textContent='Hi ha un desament pendent. Reintenta els mateixos valors abans de canviar-los.';return;}
  state.uploading=true;button.disabled=true;button.textContent='Guardant cromo…';modal.querySelector('[data-action=close]').disabled=true;
  try{
   let transaction=existing;
-  if(!transaction){const payload={...draft,request_id:requestId()};if(file){const prepared=await prepareUpload(file,{config:{...state.data.config,image_max_dimension:state.data.config.portrait_max_dimension||1200,upload_max_bytes:state.data.config.portrait_max_bytes||409600}});if(!isCurrentSession(identity))return;payload.photo_base64=prepared.photo_base64;payload.foto_id=prepared.foto_id;}if(!isCurrentSession(identity))return;transaction={id:form.dataset.id||undefined,signature,payload};state.playerDraft=transaction;}
+  if(!transaction){const payload={...draft,request_id:requestId()};if(prepared){payload.photo_base64=prepared.photo_base64;payload.foto_id=prepared.foto_id;}if(!isCurrentSession(identity))return;transaction={id:form.dataset.id||undefined,signature,payload};state.playerDraft=transaction;}
   if(!isCurrentSession(identity))return;await api(transaction.payload);if(!isCurrentSession(identity))return;state.playerDraft=null;state.uploading=false;modal.close();await refresh(false);if(isCurrentSession(identity))toast('Cromo guardat a l’àlbum.');
- }catch(e){if(!isCurrentSession(identity))return;if(['VALIDATION','FORBIDDEN','CONFLICT'].includes(e.code))state.playerDraft=null;const error=$('player-error');if(error){error.hidden=false;error.textContent=e.message;}if(button.isConnected){button.textContent=state.playerDraft?'Reintentar el mateix cromo':'Guardar cromo';if(state.playerDraft)form.elements.retrat.value='';}}
+ }catch(e){if(!isCurrentSession(identity))return;if(['VALIDATION','FORBIDDEN','CONFLICT'].includes(e.code))state.playerDraft=null;if(error){error.hidden=false;error.textContent=e.message;}if(button.isConnected){button.textContent=state.playerDraft?'Reintentar el mateix cromo':'Guardar cromo';if(state.playerDraft){form.elements.retrat.value='';form.elements.retrat.disabled=true;const edit=form.querySelector('[data-action="edit-portrait"]');if(edit)edit.disabled=true;}}}
  finally{if(isCurrentSession(identity)){state.uploading=false;if(button.isConnected){button.disabled=false;const close=modal.querySelector('[data-action=close]');if(close)close.disabled=false;}}}
 }
 
@@ -251,10 +294,11 @@ function applyBootstrap(data,identity=sessionIdentity()){
   if(data.features?.fresh_permissions&&data.user?.privacyAccepted&&sameRole){
   for(const j of data.jugadors||[]){const key=portraitKey(j),url=state.portraits.get(key);if(j.te_retrat&&url)keep.set(key,url);}
  }
- const keptUrls=new Set(keep.values());state.viewGeneration++;
+ const playerForm=modal.querySelector('#player-form'),keepPlayerEditor=!!playerForm&&data.user?.rol==='admin'&&data.user?.privacyAccepted&&data.features?.player_cards&&data.features?.fresh_permissions;
+ const keptUrls=new Set(keep.values());if(keepPlayerEditor&&state.playerPreviewUrl)keptUrls.add(state.playerPreviewUrl);state.viewGeneration++;
  state.images.forEach(url=>{if(!keptUrls.has(url)){URL.revokeObjectURL(url);state.images.delete(url);}});
   state.portraits=keep;state.portraitsVerified=!!(data.features?.fresh_permissions&&data.user?.privacyAccepted);state.portraitLoads.clear();state.thumbs.clear();state.galleryCacheIds.clear();state.gallery=[];state.galleryNext=null;
- if(modal.open&&(state.viewerPhoto||modal.querySelector('.player-card-detail')))modal.close();
+ if(modal.open&&(state.viewerPhoto||modal.querySelector('.player-card-detail')||(playerForm&&!keepPlayerEditor)))modal.close();
  if(data.user?.rol!=='admin'){state.users=[];if(state.view==='families')state.view='home';}
  state.data=data;state.verified=true;cacheData();return true;
 }
@@ -355,6 +399,12 @@ async function action(target){
  if(a==='player')return playerDetails(id);
  if(a==='edit-player')return playerEditor(id);
  if(a==='add-player')return playerEditor();
+ if(a==='edit-portrait')return editPlayerPortrait(target.closest('#player-form'));
+ if(a==='rotate-portrait-left'){state.playerPortraitEditor?.rotate(-90);return;}
+ if(a==='rotate-portrait-right'){state.playerPortraitEditor?.rotate(90);return;}
+ if(a==='reset-portrait'){state.playerPortraitEditor?.reset();return;}
+ if(a==='cancel-portrait'){cancelPlayerPortrait(target.closest('#player-form'));return;}
+ if(a==='apply-portrait')return applyPlayerPortrait(target.closest('#player-form'));
  if(a==='match-gallery'){modal.close();state.galleryMatch=id;return navigate('photos');}
  if(a==='edit-match')return editor(id);
  if(a==='edit-tab')return editor(state.modalMatch,target.dataset.mode);
@@ -382,9 +432,9 @@ async function action(target){
 document.addEventListener('click',e=>{const target=e.target.closest('[data-action]');if(!target||target.disabled)return;action(target).catch(err=>toast(err.message));});
 document.addEventListener('submit',e=>{const form=e.target;const handler={'login-form':login,'privacy-form':acceptPrivacy,'edit-form':saveEdit,'upload-form':beginUpload,'player-form':savePlayer,'user-form':saveUser}[form.id];if(handler){e.preventDefault();handler(form).catch(err=>toast(err.message));}});
 document.addEventListener('input',e=>{if(e.target.closest('#player-form'))updatePlayerPreview(e.target.closest('#player-form'));});
-document.addEventListener('change',e=>{if(e.target.closest('#player-form'))updatePlayerPreview(e.target.closest('#player-form'));if(e.target.closest('#upload-form')&&(e.target.name==='jugadors'||e.target.name==='sense_jugadors'))updateUploadChoice(e.target.closest('#upload-form'),e.target);if(e.target.id==='gallery-match'){state.galleryMatch=e.target.value;loadGallery(true);}if(e.target.id==='hidden-photos'){state.includeHidden=e.target.checked;loadGallery(true);}if(e.target.id==='match-status'){const played=e.target.value==='jugat';['gols-local','gols-visitant'].forEach(id=>{const input=$(id);input.disabled=!played;input.required=played;});}});
+document.addEventListener('change',e=>{const playerForm=e.target.closest('#player-form');if(playerForm){if(e.target.name==='retrat')selectPlayerPortrait(playerForm,e.target.files[0]).catch(err=>setPortraitStatus(err.message,true));else updatePlayerPreview(playerForm);}if(e.target.closest('#upload-form')&&(e.target.name==='jugadors'||e.target.name==='sense_jugadors'))updateUploadChoice(e.target.closest('#upload-form'),e.target);if(e.target.id==='gallery-match'){state.galleryMatch=e.target.value;loadGallery(true);}if(e.target.id==='hidden-photos'){state.includeHidden=e.target.checked;loadGallery(true);}if(e.target.id==='match-status'){const played=e.target.value==='jugat';['gols-local','gols-visitant'].forEach(id=>{const input=$(id);input.disabled=!played;input.required=played;});}});
 modal.addEventListener('cancel',e=>{if(state.uploading)e.preventDefault();});
-modal.addEventListener('close',()=>{state.viewerPhoto=null;releaseImage(state.viewerUrl);state.viewerUrl=null;if(state.playerPreviewUrl){releaseImage(state.playerPreviewUrl);state.playerPreviewUrl=null;}state.queue=state.uploading?state.queue:null;});
+modal.addEventListener('close',()=>{state.viewerPhoto=null;releaseImage(state.viewerUrl);state.viewerUrl=null;disposePlayerPortrait();state.queue=state.uploading?state.queue:null;modal.className='';modal.replaceChildren();});
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installEvent=e;});
 window.addEventListener('offline',()=>{state.verified=false;forgetImages();state.gallery=[];if(modal.open&&!state.uploading)modal.close();render();});
 window.addEventListener('online',()=>refresh());
