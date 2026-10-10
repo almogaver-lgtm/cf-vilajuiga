@@ -1,6 +1,6 @@
 # CF Vilajuïga · Guia de l’app
 
-PWA en català, frontend `4.0.3` i backend Apps Script `3.0.1`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
+PWA en català, frontend `4.0.4` i backend Apps Script `3.0.1`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
 
 ## Funcions
 
@@ -34,18 +34,18 @@ Rols:
 
 El servidor torna a comprovar usuari, rol, activació i privacitat a cada petició. Quan queden menys de set dies, la sessió es renova automàticament. Revocar sessions incrementa `sessio_epoch` i invalida tots els dispositius d’aquell usuari.
 
-## Desplegament 4.0.3 / backend 3.0.1
+## Desplegament 4.0.4 / backend 3.0.1
 
-Aquesta versió afegeix l’editor local de retrats dels cromos i conserva les millores de rendiment de 4.0.2. Els originals es processen només en memòria, el JPEG final no conserva metadades i no es modifica l’esquema de dades.
+Aquesta versió prepara les noves fotografies de galeria com a JPEG de fins a 1280 px i 800 KiB, amb miniatures de fins a 480 px i 80 KiB. Els fitxers es processen només en memòria, no conserven metadades i les fotografies existents no es modifiquen. L’editor local de retrats manté els seus límits independents.
 
 1. Executa les quatre suites locals i revisa el diff.
 2. Publica primer el backend `3.0.1` com una nova versió del desplegament Apps Script existent, conservant la mateixa URL `/exec`.
 3. Comprova que `health` retorna `version: "3.0.1"` i `configured: true`, sense consultar dades privades.
 4. Prova invitació, consentiment, renovació, logout, galeria i cromos en un entorn de validació.
-5. Publica el frontend `4.0.3` a GitHub Pages només després de l’aprovació final.
-6. Recarrega les pestanyes ja obertes i torna a obrir l’app instal·lada. El service worker `4.0.3` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
+5. Publica el frontend `4.0.4` a GitHub Pages només després de l’aprovació final.
+6. Recarrega les pestanyes ja obertes i torna a obrir l’app instal·lada. El service worker `4.0.4` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
 
-El frontend `4.0.3` manté el contracte del backend `3.0.1`; l’editor de retrats és íntegrament local i no afegeix cap camp ni acció d’API.
+El frontend `4.0.4` manté el contracte del backend `3.0.1`; la compressió és íntegrament local i no afegeix cap camp ni acció d’API.
 
 ## Administració
 

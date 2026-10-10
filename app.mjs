@@ -2,7 +2,7 @@ import {API_URL,APP_VERSION,TEAM_NAME} from './config.mjs';
 import {playerCard,POSITIONS} from './player-cards.mjs';
 import {mediaBatches} from './media-batches.mjs';
 import {LEAGUE,CLUBS,clubFor,clubMapsUrl} from './league.mjs';
-import {apiPost,requestId,prepareUpload,jpegBlob} from './api-client.mjs';
+import {apiPost,requestId,prepareUpload,galleryUploadConfig,jpegBlob} from './api-client.mjs';
 import {createPortraitEditor} from './portrait-editor.mjs';
 import {esc,sortedMatches,nextMatch,lastMatch,opponent,result,dateLabel,mapsUrl,filterMatches,icsForMatch,usableSession} from './domain.mjs';
 const $=id=>document.getElementById(id);
@@ -372,10 +372,10 @@ function queueDialog(){
  const close=modal.querySelector('[data-action=close]');if(close)close.disabled=state.uploading;
 }
 async function uploadQueue(){
- if(!state.queue||state.uploading||!state.verified||!navigator.onLine)return;const identity=sessionIdentity(),q=state.queue;state.uploading=true;queueDialog();
+ if(!state.queue||state.uploading||!state.verified||!navigator.onLine)return;const identity=sessionIdentity(),q=state.queue,config=galleryUploadConfig(state.data.config);state.uploading=true;queueDialog();
  for(const item of q.items){if(!isCurrentSession(identity))return;if(item.status==='done')continue;if(!navigator.onLine){item.status='failed';item.error='S’ha perdut la connexió. Les fotos anteriors ja estan guardades.';break;}
   item.status='uploading';item.error='';queueDialog();
-  try{const prepared=item.prepared||await prepareUpload(item.file,{partit_id:q.partit_id,jugadors_ids:q.jugadors_ids,sense_jugadors:q.sense_jugadors,peu:q.peu,config:state.data.config});if(!isCurrentSession(identity))return;item.prepared=prepared;await api(prepared);if(!isCurrentSession(identity))return;item.status='done';item.prepared=null;}
+  try{const prepared=item.prepared||await prepareUpload(item.file,{partit_id:q.partit_id,jugadors_ids:q.jugadors_ids,sense_jugadors:q.sense_jugadors,peu:q.peu,config});if(!isCurrentSession(identity))return;item.prepared=prepared;await api(prepared);if(!isCurrentSession(identity))return;item.status='done';item.prepared=null;}
   catch(e){if(!isCurrentSession(identity))return;item.status='failed';item.error=e.message;if(['VALIDATION','FORBIDDEN','PRIVACY_REQUIRED'].includes(e.code))item.prepared=null;break;}
  }
  if(isCurrentSession(identity)){state.uploading=false;queueDialog();await loadGallery(true);}

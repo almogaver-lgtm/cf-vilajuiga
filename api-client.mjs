@@ -22,6 +22,11 @@ export async function apiPost(url, payload, {timeoutMs=45000}={}) {
   } finally {clearTimeout(timer);}
 }
 export const requestId=()=>crypto.randomUUID();
+export const GALLERY_UPLOAD_LIMITS=Object.freeze({image_max_dimension:1280,upload_max_bytes:819200,thumbnail_max_dimension:480,thumbnail_max_bytes:81920});
+const cappedLimit=(value,cap)=>{const number=Number(value);return Math.min(Number.isFinite(number)&&number>0?number:cap,cap);};
+export function galleryUploadConfig(config={}) {
+  return {...config,image_max_dimension:cappedLimit(config.image_max_dimension,GALLERY_UPLOAD_LIMITS.image_max_dimension),upload_max_bytes:cappedLimit(config.upload_max_bytes,GALLERY_UPLOAD_LIMITS.upload_max_bytes),thumbnail_max_dimension:cappedLimit(config.thumbnail_max_dimension,GALLERY_UPLOAD_LIMITS.thumbnail_max_dimension),thumbnail_max_bytes:cappedLimit(config.thumbnail_max_bytes,GALLERY_UPLOAD_LIMITS.thumbnail_max_bytes),avoid_size_increase:true};
+}
 export function jpegBlob(base64) {
   const binary=atob(base64),data=new Uint8Array(binary.length);
   for(let i=0;i<binary.length;i++)data[i]=binary.charCodeAt(i);
@@ -55,7 +60,9 @@ export async function prepareUpload(file,{partit_id,jugadors_ids=[],sense_jugado
   if(!(file instanceof Blob)||file.size>35*1024*1024||file.type==='image/svg+xml')throw new Error('Tria una fotografia de menys de 35 MB.');
   const decoded=await decodedImage(file);
   try {
-    const photo=await resize(decoded.image,config.image_max_dimension||1600,config.upload_max_bytes||1572864,.82);
+    const maxDimension=config.image_max_dimension||1600,maxBytes=config.upload_max_bytes||1572864;
+    const keepSourceSize=config.avoid_size_increase===true&&file.type==='image/jpeg'&&Math.max(decoded.image.width,decoded.image.height)<=maxDimension&&file.size<=maxBytes;
+    const photo=await resize(decoded.image,maxDimension,keepSourceSize?Math.min(maxBytes,file.size):maxBytes,.82);
     const thumb=await resize(decoded.image,Math.min(config.thumbnail_max_dimension||480,Math.max(photo.width,photo.height)),config.thumbnail_max_bytes||122880,.70);
     return {action:'uploadPhoto',request_id:requestId(),foto_id:requestId(),partit_id,jugadors_ids,sense_jugadors,peu,
       photo_base64:await base64Blob(photo.blob),thumb_base64:await base64Blob(thumb.blob)};
