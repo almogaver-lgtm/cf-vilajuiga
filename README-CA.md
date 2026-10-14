@@ -1,6 +1,6 @@
 # CF Vilajuïga · Guia de l’app
 
-PWA en català, frontend `4.1.0` i backend Apps Script `3.1.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
+PWA en català, frontend `4.1.1` i backend Apps Script `3.1.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
 
 ## Funcions
 
@@ -36,19 +36,19 @@ Rols:
 
 El servidor torna a comprovar usuari, rol, activació i privacitat a cada petició. Quan queden menys de set dies, la sessió es renova automàticament. Revocar sessions incrementa `sessio_epoch` i invalida tots els dispositius d’aquell usuari.
 
-## Desplegament 4.1.0 / backend 3.1.0
+## Desplegament 4.1.1 / backend 3.1.0
 
-Aquesta versió permet a família, editor i administració editar qualsevol cromo visible, incorpora gir fi del retrat i afegeix l’edició administrativa de famílies. Només administració pot crear cromos o editar-ne d’ocults. Les imatges es processen només en memòria i l’editor local manté els límits de 1200 px i 400 KiB.
+Aquesta versió permet a família, editor i administració editar qualsevol cromo visible, incorpora gir fi del retrat i afegeix l’edició administrativa de famílies. El frontend `4.1.1` mostra una vegada un avís local a famílies i editors per donar a conèixer l’edició de cromos. Només administració pot crear cromos o editar-ne d’ocults. Les imatges es processen només en memòria i l’editor local manté els límits de 1200 px i 400 KiB.
 
 1. Executa les quatre suites locals i revisa el diff.
 2. Fes una còpia de seguretat del Sheet i executa `installBackend()` perquè afegeixi idempotentment la columna final `fills` a `03_USUARIS`.
 3. Publica primer el backend `3.1.0` com una nova versió del desplegament Apps Script existent, conservant la mateixa URL `/exec`.
 4. Comprova que `health` retorna `version: "3.1.0"` i `configured: true`, sense consultar dades privades.
 5. Prova invitació, consentiment, renovació, logout, edició de famílies i cromos en un entorn de validació.
-6. Publica el frontend `4.1.0` a GitHub Pages només després de l’aprovació final.
-7. Recarrega les pestanyes ja obertes i torna a obrir l’app instal·lada. El service worker `4.1.0` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
+6. Publica el frontend `4.1.1` a GitHub Pages només després de l’aprovació final.
+7. Recarrega les pestanyes ja obertes i torna a obrir l’app instal·lada. El service worker `4.1.1` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
 
-El frontend `4.1.0` comprova `features.family_player_edit`, `features.family_user_edit` i `features.family_children` abans d’oferir els controls nous. Amb el backend `3.0.1`, manté alta, invitacions, revocació i activació/desactivació de famílies, però oculta l’edició i el camp `fills` perquè el servidor antic no els pot conservar. El backend `3.1.0` manté temporalment el contracte `saveUser` de la versió 4.0.4 i preserva `fills` quan rep una d’aquestes operacions antigues.
+El frontend `4.1.1` comprova `features.family_player_edit`, `features.family_user_edit` i `features.family_children` abans d’oferir els controls nous. Amb el backend `3.0.1`, manté alta, invitacions, revocació i activació/desactivació de famílies, però oculta l’edició i el camp `fills` perquè el servidor antic no els pot conservar. El backend `3.1.0` manté temporalment el contracte `saveUser` de la versió 4.0.4 i preserva `fills` quan rep una d’aquestes operacions antigues.
 
 ## Administració
 

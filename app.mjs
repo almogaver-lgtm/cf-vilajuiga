@@ -9,6 +9,7 @@ const $=id=>document.getElementById(id);
 const root=$('app'),modal=$('modal');
 const PREFIX='cfv:v3:'+new URL('.',import.meta.url).pathname+':';
 const SESSION_KEY=PREFIX+'session';
+const PLAYER_EDIT_NOTICE_KEY='cfv:preferences:'+new URL('.',import.meta.url).pathname+':player-edit-notice-v1';
 const storedValue=k=>{try{return localStorage.getItem(k);}catch{return null;}};
 const parseStored=value=>{try{return value===null?null:JSON.parse(value);}catch{return null;}};
 const read=k=>parseStored(storedValue(k));
@@ -20,7 +21,7 @@ let sessionGeneration=0,authAttemptGeneration=0,playerPortraitGeneration=0;
 const state={session:usableSession(stored)?stored:null,data:null,view:'home',filter:'all',verified:false,loading:false,error:'',loginBusy:false,
   privacy:null,authUser:null,galleryMatch:'',gallery:[],galleryNext:null,galleryLoading:false,galleryCacheIds:new Set(),includeHidden:false,thumbs:new Map(),images:new Set(),
   queue:null,uploading:false,installEvent:null,modalMatch:null,editMode:'result',viewerPhoto:null,viewerUrl:null,viewGeneration:0,portraits:new Map(),portraitsVerified:false,portraitLoads:new Set(),playerDraft:null,playerPreviewUrl:null,playerPortraitEditor:null,playerPortraitPrepared:null,playerPortraitBackup:null,playerPortraitName:'',
-  users:[],usersLoading:false,inviteMessage:'',userDraft:null,pendingUserAction:null};
+  users:[],usersLoading:false,inviteMessage:'',userDraft:null,pendingUserAction:null,playerEditNoticeDismissed:false};
 if(!state.session)clearStored();else state.data=read(PREFIX+'data:'+state.session.cacheKey)?.data||null;
 const paths={home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18m-13 4h2m4 0h2m-8 3h2"/>',photos:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L6 21"/>',team:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m2-17a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5v2"/>',arrow:'<path d="M5 12h14m-6-6 6 6-6 6"/>',chevron:'<path d="m9 5 7 7-7 7"/>',map:'<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="2.5"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',close:'<path d="m6 6 12 12M6 18 18 6"/>',refresh:'<path d="M20 7v5h-5M4 17v-5h5m-4.7-2a8 8 0 0 1 13.2-6L20 7M4 17l2.5 3A8 8 0 0 0 19.7 14"/>',download:'<path d="M12 3v12m-5-5 5 5 5-5M4 15v6h16v-6"/>',upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 16v5h16v-5"/>',edit:'<path d="m16 3 5 5-12 12-6 1 1-6zM13 6l5 5"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15m-9 3v8m4-8v8"/>',logout:'<path d="M9 4H4v16h5m3-8h9m-4-4 4 4-4 4"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/>',ball:'<circle cx="12" cy="12" r="9"/><path d="m12 7 4 3-2 5h-4l-2-5zm0 0V3m4 7 5-1m-7 6 3 5m-7-5-3 5m1-10L3 9"/>',check:'<path d="m5 12 4 4L19 6"/>',phone:'<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/>'};
 const icon=name=>`<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name]||paths.info}</svg>`;
@@ -44,6 +45,10 @@ function revalidateUserFormCapabilities(form,data=state.data){
  if(form.dataset.capabilityBlocked){delete form.dataset.capabilityBlocked;if(error){error.hidden=true;error.textContent='';}if(button)button.disabled=!canWrite();}
  return true;
 }
+const playerEditNoticeEligible=()=>state.verified&&state.data?.features?.family_player_edit===true&&['familia','editor'].includes(state.data?.user?.rol);
+const showPlayerEditNotice=()=>playerEditNoticeEligible()&&state.view!=='team'&&!state.playerEditNoticeDismissed&&read(PLAYER_EDIT_NOTICE_KEY)!==true;
+function markPlayerEditNoticeSeen(){state.playerEditNoticeDismissed=true;write(PLAYER_EDIT_NOTICE_KEY,true);}
+function playerEditNotice(){return `<aside class="player-edit-notice" role="status"><strong>✨ Ja pots editar els cromos!</strong><p>Entra a Equip i personalitza la foto, el nom i el dorsal.</p><div class="player-edit-notice-actions">${actionBtn('open-player-cards','Veure els cromos','btn small')}${actionBtn('dismiss-player-edit-notice','Entesos','text-btn')}</div></aside>`;}
 const user=()=>state.data?.user||state.authUser||{};
 const team=()=>state.data?.config?.equip_nom||TEAM_NAME;
 const matches=()=>state.data?.partits||[];
@@ -83,7 +88,7 @@ function render(){
  if(state.view==='photos')paintThumbs();
  if(state.view==='team'){paintPortraits();loadPortraits().catch(()=>{});}
 }
-function nav(){const items=[['home','Inici','home'],['calendar','Partits','calendar'],['photos','Galeria','photos'],['team','Equip','team'],['league','Lliga','ball']];if(isAdmin())items.push(['families','Famílies','team']);return items.map(([view,label,ico])=>`<button type="button" class="nav-btn ${state.view===view?'active':''}" data-action="navigate" data-view="${view}" ${state.view===view?'aria-current="page"':''}>${icon(ico)}<span>${label}</span></button>`).join('');}
+function nav(){const items=[['home','Inici','home'],['calendar','Partits','calendar'],['photos','Galeria','photos'],['team','Equip','team'],['league','Lliga','ball']];if(isAdmin())items.push(['families','Famílies','team']);return items.map(([view,label,ico])=>`<div class="nav-item"><button type="button" class="nav-btn ${state.view===view?'active':''}" data-action="navigate" data-view="${view}" ${state.view===view?'aria-current="page"':''}>${icon(ico)}<span>${label}</span></button>${view==='team'&&showPlayerEditNotice()?playerEditNotice():''}</div>`).join('');}
 function renderLogin(){
  const privacy=state.privacy;
  root.innerHTML=`<main class="login"><section class="login-poster" aria-label="La nostra temporada"><div class="poster-top"><div class="brand-line"><img src="./assets/crest.jpg" alt="Escut CF Vilajuïga"><div class="brand-title">CF VILAJUÏGA<small>La nostra temporada</small></div></div><span class="season-chip">2026 / 27</span></div><div class="poster-content"><p class="eyebrow">Futbol, família i poble</p><h1>Més que<br>un partit.<br><em>Som equip.</em></h1></div><div class="poster-bottom"><span>El lloc on guardar tot allò que passa dins i fora del camp.</span><span class="eyebrow">Vilajuïga · Alt Empordà</span></div></section>
@@ -406,7 +411,7 @@ async function uploadQueue(){
  }
  if(isCurrentSession(identity)){state.uploading=false;queueDialog();await loadGallery(true);}
 }
-async function navigate(view){if(!['home','calendar','photos','team','league',...(isAdmin()?['families']:[])].includes(view))return;if(['photos','team'].includes(state.view)&&view!==state.view){state.viewGeneration++;state.portraitLoads.clear();if(state.view==='photos'){state.gallery=[];state.galleryNext=null;}if(state.view==='team'&&state.portraits.size)state.portraitsVerified=false;}if(state.view==='families'&&view!=='families')state.users=[];state.view=view;state.error='';render();window.scrollTo({top:0,behavior:'instant'});if(view==='photos')await loadGallery(true);if(view==='team'&&state.portraits.size&&!state.portraitsVerified)await refresh(false);if(view==='families')await loadUsers();}
+async function navigate(view){if(!['home','calendar','photos','team','league',...(isAdmin()?['families']:[])].includes(view))return;if(view==='team'&&playerEditNoticeEligible())markPlayerEditNoticeSeen();if(['photos','team'].includes(state.view)&&view!==state.view){state.viewGeneration++;state.portraitLoads.clear();if(state.view==='photos'){state.gallery=[];state.galleryNext=null;}if(state.view==='team'&&state.portraits.size)state.portraitsVerified=false;}if(state.view==='families'&&view!=='families')state.users=[];state.view=view;state.error='';render();window.scrollTo({top:0,behavior:'instant'});if(view==='photos')await loadGallery(true);if(view==='team'&&state.portraits.size&&!state.portraitsVerified)await refresh(false);if(view==='families')await loadUsers();}
 function account(){const roleNames={familia:'Família',editor:'Editor',admin:'Administrador'};openModal('El teu espai',`<div class="account-summary"><div class="avatar">${esc(initials(user().nom))}</div><div><h3>${esc(user().nom)}</h3><p>${esc(roleNames[user().rol]||'Família')}</p></div></div><div class="account-links">${actionBtn('install',icon('phone')+' Afegir l’app al mòbil','btn secondary')}${actionBtn('about',icon('info')+' Sobre aquesta app','btn ghost')}${actionBtn('logout',icon('logout')+' Tancar sessió','btn ghost',state.uploading?'disabled':'')}</div><p class="hint" style="margin-top:25px">Versió ${APP_VERSION} · Sessió fins al ${esc(state.session?.expiresAt?dateLabel(state.session.expiresAt.slice(0,10)):'—')}</p>`);}
 function about(){openModal('Futbol, família i poble',`<div class="credits"><p>Aquesta és l’app privada de les famílies del CF Vilajuïga. Calendari, resultats i records de la temporada.</p><p><strong>Privacitat</strong><br>Les fotografies són d’ús familiar. No les publiquis ni les comparteixis fora del grup sense autorització.</p><p><strong>Sense connexió</strong><br>Pots consultar les últimes dades guardades de la temporada mentre la sessió sigui vigent. Les fotos i les edicions necessiten connexió.</p><p><strong>Imatges del disseny</strong><br>Foto ambiental: <a href="https://unsplash.com/photos/soccer-ball-rests-in-the-grass-at-sunset-GTxVeJj1UU0" target="_blank" rel="noopener noreferrer">Nikola Tomašić · Unsplash</a>. No és una fotografia del camp de Vilajuïga.<br>Escut publicat a <a href="https://futbol-regional.es/equipo.php?equ=15064" target="_blank" rel="noopener noreferrer">Fútbol Regional Español</a>; pendent de confirmar amb el club que aquesta és la versió actual. La icona de l’app és un monograma propi.</p><p>Tipografia Barlow Condensed: Jeremy Tribby, SIL Open Font License. Versió ${APP_VERSION}.</p></div>`);}
 async function install(){
@@ -417,6 +422,8 @@ async function logout(){if(state.uploading)return;const session=state.session;cl
 async function action(target){
  const a=target.dataset.action,id=target.dataset.id;
  if(a==='close'){if(!state.uploading)modal.close();return;}
+ if(a==='dismiss-player-edit-notice'){markPlayerEditNoticeSeen();render();return;}
+ if(a==='open-player-cards')return navigate('team');
  if(a==='navigate')return navigate(target.dataset.view);
  if(a==='filter'){state.filter=target.dataset.filter;render();return;}
  if(a==='refresh')return refresh();
