@@ -1,6 +1,10 @@
 import {esc} from './domain.mjs';
 export const POSITIONS=['Porter','Defensa','Migcampista','Davanter'];
 export function cardRole(position){return ({Porter:'GK',Defensa:'DF',Migcampista:'MC',Davanter:'DV'})[position]||'CFV';}
+export function sortedPlayers(players){
+ const jersey=player=>{if(player.dorsal===''||player.dorsal===null||player.dorsal===undefined)return null;const value=Number(player.dorsal);return Number.isInteger(value)&&value>=0&&value<=99?value:null;};
+ return [...players].sort((a,b)=>{const ad=jersey(a),bd=jersey(b);if(ad!==null||bd!==null){if(ad===null)return 1;if(bd===null)return -1;if(ad!==bd)return ad-bd;}return String(a.nom||'').localeCompare(String(b.nom||''),'ca',{sensitivity:'base'})||String(a.jugador_id||'').localeCompare(String(b.jugador_id||''));});
+}
 export function playerCard(j,{season='2026/27',preview=false,large=false}={}){
  const position=POSITIONS.includes(j.posicio)?j.posicio:'Posició pendent';
  const jersey=j.dorsal===''||j.dorsal==null?'—':String(j.dorsal);

@@ -1,4 +1,4 @@
-# CF Vilajuïga · Backend Apps Script 3.0.1
+# CF Vilajuïga · Backend Apps Script 3.1.0
 
 Backend privat basat en Google Apps Script, Sheets i Drive. No hi ha secrets, telèfons reals ni fotografies al repositori.
 
@@ -12,13 +12,13 @@ Backend privat basat en Google Apps Script, Sheets i Drive. No hi ha secrets, te
 6. Executa `adminInvite(telefon)` des d’una funció temporal per obtenir la primera invitació.
 7. Publica una **Nova versió** del desplegament existent, amb la mateixa URL `/exec`.
 
-`installBackend()` és repetible. Migra la columna `codi` de `03_USUARIS` a `sessio_epoch`, esborra els codis permanents antics, crea `07_INVITACIONS`, elimina `login_mode` i afegeix `invite_ttl_hours=48`.
+`installBackend()` és repetible. Migra la columna `codi` de `03_USUARIS` a `sessio_epoch`, afegeix `fills` al final de la pestanya sense moure les dades existents, esborra els codis permanents antics, crea `07_INVITACIONS`, elimina `login_mode` i afegeix `invite_ttl_hours=48`.
 
 ## Pestanyes
 
 - `01_PARTITS`: calendari, resultats i cròniques.
 - `02_CONFIG`: configuració validada del servei.
-- `03_USUARIS`: telèfon, rol, estat, privacitat i `sessio_epoch`.
+- `03_USUARIS`: telèfon, rol, estat, privacitat, `sessio_epoch` i el camp administratiu opcional `fills`.
 - `04_FOTOS`: metadades privades de fotografies.
 - `05_JUGADORS`: cromos, restriccions i retrats.
 - `06_REGISTRE`: auditoria d’accessos i escriptures.
@@ -41,7 +41,9 @@ Escriptures autenticades:
 
 - `acceptPrivacy`, `logout`, `updateResult`, `updateChronicle`.
 - `uploadPhoto`, `downloadPhoto`, `hidePhoto`, `showPhoto`, `deletePhoto`.
-- `savePlayer`, `createInvite`, `saveUser`, `revokeSessions`.
+- `savePlayer`, `createInvite`, `saveUser`, `updateUser`, `revokeSessions`.
+
+`saveUser` amb `request_id` només crea famílies noves. `updateUser` modifica una fila existent amb control de versió i reintents idempotents; un canvi de telèfon reserva temporalment origen i destí, bloqueja altres escriptures de la família i invalida les sessions i invitacions antigues. Per permetre el desplegament backend-primer, `saveUser` sense `request_id` conserva temporalment l’operació de la versió frontend 4.0.4 i mai esborra el camp `fills` existent. `bootstrap` anuncia `family_user_edit` i `family_children` perquè el frontend només mostri camps que el backend pot conservar. Els rols família i editor només poden editar cromos visibles existents; només administració pot crear cromos o editar-ne d’ocults.
 
 La resposta sempre és una d’aquestes formes:
 
@@ -80,6 +82,7 @@ Les lectures `bootstrap`, `getPlayerPortraits`, `listPhotos` i `getThumbnails` a
 - `adminInvite(telefon)`
 - `invalidateUserCache()`
 - `recoverPendingMatchAudits()`
+- `recoverPendingUserUpdates()`
 - `maintenance()`
 - `purgaRegistre(dies)`
 - `importCalendar(csvText)`

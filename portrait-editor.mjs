@@ -3,20 +3,22 @@ const MIN_ZOOM=1,MAX_ZOOM=3;
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
 
 export function normalizeRotation(value){
- const quarter=Math.round((Number(value)||0)/90)*90;
- return ((quarter%360)+360)%360;
+ const number=Number(value);if(!Number.isFinite(number))return 0;
+ const rounded=Math.round(number*10)/10,wrapped=((rounded%360)+360)%360,signed=wrapped>180?wrapped-360:wrapped;
+ return Math.round(signed*10)/10;
 }
 
 export function portraitTransform({sourceWidth,sourceHeight,frameWidth=PORTRAIT_OUTPUT.width,frameHeight=PORTRAIT_OUTPUT.height,rotation=0,zoom=1,panX=0,panY=0}){
  const width=Number(sourceWidth),height=Number(sourceHeight),targetWidth=Number(frameWidth),targetHeight=Number(frameHeight);
  if(!(width>0&&height>0&&targetWidth>0&&targetHeight>0))throw new Error('Dimensions de retrat no vàlides.');
- const normalizedRotation=normalizeRotation(rotation),swapped=normalizedRotation===90||normalizedRotation===270;
- const orientedWidth=swapped?height:width,orientedHeight=swapped?width:height;
+ const normalizedRotation=normalizeRotation(rotation),angle=normalizedRotation*Math.PI/180,cos=Math.cos(angle),sin=Math.sin(angle),absCos=Math.abs(cos),absSin=Math.abs(sin);
  const normalizedZoom=clamp(Number(zoom)||MIN_ZOOM,MIN_ZOOM,MAX_ZOOM);
- const scale=Math.max(targetWidth/orientedWidth,targetHeight/orientedHeight)*normalizedZoom;
- const maxPanX=Math.max(0,(orientedWidth*scale-targetWidth)/(2*targetWidth));
- const maxPanY=Math.max(0,(orientedHeight*scale-targetHeight)/(2*targetHeight));
- return {rotation:normalizedRotation,zoom:normalizedZoom,panX:clamp(Number(panX)||0,-maxPanX,maxPanX),panY:clamp(Number(panY)||0,-maxPanY,maxPanY),scale,maxPanX,maxPanY};
+ const scale=Math.max((absCos*targetWidth+absSin*targetHeight)/width,(absSin*targetWidth+absCos*targetHeight)/height)*normalizedZoom;
+ const maxLocalX=Math.max(0,(width*scale-(absCos*targetWidth+absSin*targetHeight))/2),maxLocalY=Math.max(0,(height*scale-(absSin*targetWidth+absCos*targetHeight))/2);
+ const requestedX=(Number(panX)||0)*targetWidth,requestedY=(Number(panY)||0)*targetHeight;
+ const localX=clamp(cos*requestedX+sin*requestedY,-maxLocalX,maxLocalX),localY=clamp(-sin*requestedX+cos*requestedY,-maxLocalY,maxLocalY);
+ const translatedX=cos*localX-sin*localY,translatedY=sin*localX+cos*localY,clean=value=>Math.abs(value)<1e-12?0:value,normalizedPanX=clean(translatedX/targetWidth),normalizedPanY=clean(translatedY/targetHeight);
+ return {rotation:normalizedRotation,zoom:normalizedZoom,panX:normalizedPanX,panY:normalizedPanY,scale,maxPanX:Math.abs(cos)*maxLocalX/targetWidth+Math.abs(sin)*maxLocalY/targetWidth,maxPanY:Math.abs(sin)*maxLocalX/targetHeight+Math.abs(cos)*maxLocalY/targetHeight};
 }
 
 async function decodePortrait(file){
@@ -31,7 +33,7 @@ async function decodePortrait(file){
 
 function canvasBlob(canvas,quality){return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('No s’ha pogut preparar el JPEG.')),'image/jpeg',quality));}
 
-export async function createPortraitEditor(file,{canvas,zoomInput,onChange}={}){
+export async function createPortraitEditor(file,{canvas,zoomInput,rotationInput,rotationOutput,onChange}={}){
  if(!(canvas instanceof HTMLCanvasElement))throw new Error('No s’ha trobat el llenç de retall.');
  const decoded=await decodePortrait(file),sourceWidth=decoded.image.width,sourceHeight=decoded.image.height;
  if(!(sourceWidth>0&&sourceHeight>0)){decoded.close();throw new Error('La fotografia no té dimensions vàlides.');}
@@ -48,7 +50,7 @@ export async function createPortraitEditor(file,{canvas,zoomInput,onChange}={}){
   ctx.rotate(current.rotation*Math.PI/180);ctx.scale(current.scale,current.scale);
   ctx.drawImage(decoded.image,-sourceWidth/2,-sourceHeight/2);ctx.restore();
  };
- const redraw=()=>{if(destroyed)return;transform=normalized();if(zoomInput)zoomInput.value=String(transform.zoom);canvas.dataset.rotation=String(transform.rotation);canvas.dataset.zoom=String(transform.zoom);canvas.dataset.panX=String(transform.panX);canvas.dataset.panY=String(transform.panY);drawTo(canvas);onChange?.();};
+ const redraw=()=>{if(destroyed)return;transform=normalized();if(zoomInput)zoomInput.value=String(transform.zoom);if(rotationInput)rotationInput.value=String(transform.rotation);if(rotationOutput)rotationOutput.textContent=transform.rotation.toFixed(1)+'°';canvas.dataset.rotation=String(transform.rotation);canvas.dataset.zoom=String(transform.zoom);canvas.dataset.panX=String(transform.panX);canvas.dataset.panY=String(transform.panY);drawTo(canvas);onChange?.();};
  const setTransform=next=>{transform={...transform,...next};redraw();};
  const pointerPosition=event=>({x:event.clientX,y:event.clientY});
  const beginPinch=()=>{if(pointers.size!==2){pinch=null;return;}const [a,b]=[...pointers.values()],rect=canvas.getBoundingClientRect();pinch={distance:Math.hypot(b.x-a.x,b.y-a.y)||1,midX:(a.x+b.x)/2,midY:(a.y+b.y)/2,zoom:transform.zoom,panX:transform.panX,panY:transform.panY,width:rect.width||1,height:rect.height||1};};
@@ -61,12 +63,13 @@ export async function createPortraitEditor(file,{canvas,zoomInput,onChange}={}){
  listen(canvas,'pointerup',endPointer);listen(canvas,'pointercancel',endPointer);listen(canvas,'lostpointercapture',endPointer);
  listen(canvas,'wheel',event=>{event.preventDefault();setTransform({zoom:transform.zoom*(event.deltaY<0?1.08:.92)});},{passive:false});
  if(zoomInput)listen(zoomInput,'input',()=>setTransform({zoom:Number(zoomInput.value)}));
+ if(rotationInput)listen(rotationInput,'input',()=>setTransform({rotation:Number(rotationInput.value)}));
  canvas.width=532;canvas.height=600;redraw();
  return {
   drawTo,
   getTransform:()=>({...transform}),
   setTransform,
-  rotate:degrees=>setTransform({rotation:transform.rotation+degrees,panX:0,panY:0}),
+  rotate:degrees=>setTransform({rotation:transform.rotation+degrees}),
   reset:()=>setTransform({rotation:0,zoom:1,panX:0,panY:0}),
   async exportJpeg({maxBytes=409600}={}){
    for(const scale of [1,.88,.76,.66]){
