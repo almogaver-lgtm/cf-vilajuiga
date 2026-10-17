@@ -1,5 +1,5 @@
 /** CF VILAJUÏGA — Backend, Apps Script V8. No secrets in this source. */
-const APP = Object.freeze({version:'3.1.0', portraitLimit:409600, portraitDimension:1200, usersTTL:180, bodyLimit:2400000,
+const APP = Object.freeze({version:'3.2.0', portraitLimit:409600, portraitDimension:1200, usersTTL:180, bodyLimit:2400000,
   thumbLimit:122880, maxPhotosPerBatch:6, privacyText:
   "Aquesta aplicació és d'ús privat per a les famílies de l'equip i pot contenir fotografies de menors. En accedir-hi et compromets a no publicar ni redistribuir les fotografies fora del grup sense l'autorització corresponent.",
   downloadNotice:"Ús exclusivament privat i familiar. No publiquis aquesta fotografia a xarxes socials ni la comparteixis fora del grup sense autorització."});
@@ -10,9 +10,12 @@ const SCHEMA = Object.freeze({
   '04_FOTOS':['foto_id','partit_id','drive_file_id','thumb_file_id','mime_type','bytes','amplada','alcada','jugadors_ids','peu','no_mostrar','motiu_ocultacio','pujat_at','pujat_per_tel','pujat_per_nom','eliminat','eliminat_at','eliminat_per'],
   '05_JUGADORS':['jugador_id','nom','dorsal','no_mostrar','actiu','posicio','foto_id','foto_drive_file_id','actualitzat_at','ultima_peticio','ultima_peticio_hash'],
   '06_REGISTRE':['log_id','timestamp','data_local','accio','telefon','nom','rol','sessio_id','partit_id','objecte_id','valor_anterior','valor_nou','user_agent'],
-  '07_INVITACIONS':['invite_id','telefon','codi_hash','creat_at','caduca_at','creat_per','estat','intents','usat_at']
+  '07_INVITACIONS':['invite_id','telefon','codi_hash','creat_at','caduca_at','creat_per','estat','intents','usat_at'],
+  '08_DISPOSITIUS':['device_id','telefon','secret_hash','sessio_epoch','actiu','creat_at','last_used_at','revocat_at'],
+  '09_VINCULACIONS':['link_id','telefon','codi_hash','sessio_epoch','creat_at','caduca_at','estat','intents','usat_at']
 });
 const INVITE = Object.freeze({maxAttempts:5});
+const DEVICE_LINK = Object.freeze({maxAttempts:5,ttlMs:10*60000,maxPerHour:5});
 const DEFAULTS = [
   ['equip_nom','CF VILAJUÏGA','text','Equip de referència'],['temporada','2026/27','text','Temporada'],
   ['timezone','Europe/Madrid','text','Zona horària'],['app_nom','CF Vilajuïga','text','Nom'],
@@ -37,8 +40,9 @@ function inRequest_(fn) {
 function doGet(e) {
   const a=e && e.parameter && e.parameter.action || 'health';
   if(a==='version') return json_({ok:true,data:{version:APP.version}});
-  if(a==='health') return json_({ok:true,data:{service:'cf-vilajuiga',version:APP.version,
-    configured:!!(props_().getProperty('SHEET_ID') && props_().getProperty('DRIVE_ROOT_FOLDER_ID') && props_().getProperty('SESSION_SECRET'))}});
+  if(a==='health'){const remembered=rememberedAccessReady_();return json_({ok:true,data:{service:'cf-vilajuiga',version:APP.version,
+    environment:environment_(),features:{remembered_devices:remembered,device_linking:remembered},configured:!!(props_().getProperty('SHEET_ID') && props_().getProperty('DRIVE_ROOT_FOLDER_ID') && props_().getProperty('SESSION_SECRET') &&
+      (environment_()!=='preview'||props_().getProperty('PREVIEW_ALLOWED_PHONE_HASH')) && remembered)}});}
   return json_({ok:false,error:{code:'UNKNOWN_ACTION',message:'Acció no disponible.'}});
 }
 function doPost(e) {
@@ -59,8 +63,10 @@ function doPost(e) {
 }
 function dispatch_(p) {
   const reads=['bootstrap','listPhotos','getPhoto','getThumbnails','getPlayerPortraits','listUsers'];
-  const writes=['acceptPrivacy','logout','updateResult','updateChronicle','uploadPhoto','downloadPhoto','hidePhoto','showPhoto','deletePhoto','savePlayer','createInvite','saveUser','updateUser','revokeSessions'];
+  const writes=['acceptPrivacy','logout','registerDevice','createDeviceLink','updateResult','updateChronicle','uploadPhoto','downloadPhoto','hidePhoto','showPhoto','deletePhoto','savePlayer','createInvite','saveUser','updateUser','revokeSessions'];
   if(p.action==='redeemInvite') return locked_(()=>redeemInvite_(p));
+  if(p.action==='resumeDevice') return locked_(()=>resumeDevice_(p));
+  if(p.action==='redeemDeviceLink') return locked_(()=>redeemDeviceLink_(p));
   need_(reads.includes(p.action)||writes.includes(p.action),'UNKNOWN_ACTION','Acció no disponible.');
   if(writes.includes(p.action)) return locked_(()=>{
     const c=config_(), a=authenticate_(p.token,c,true);
@@ -72,6 +78,8 @@ function dispatch_(p) {
         return p.include_bootstrap===true ? {...result,bootstrap:bootstrap_(p,a,c)} : result;
       }
       case 'logout': return logout_(p,a,c);
+      case 'registerDevice': return registerDevice_(p,a,c);
+      case 'createDeviceLink': return createDeviceLink_(p,a,c);
       case 'updateResult': return updateMatch_(p,a,c,false);
       case 'updateChronicle': return updateMatch_(p,a,c,true);
       case 'uploadPhoto': return uploadPhoto_(p,a,c);
@@ -90,7 +98,7 @@ function dispatch_(p) {
   privacy_(a,c);
   if(p.action==='bootstrap') {
     const data=bootstrap_(p,a,c);
-    if(a.session.expiresAt-Date.now()<7*86400000){const renewed=issueSession_(a.user,c);data.renewed={token:renewed.token,expiresAt:renewed.expiresAt};}
+    if(a.session.expiresAt-Date.now()<7*86400000){const renewed=issueSession_(a.user,c,a.session.device_id);data.renewed={token:renewed.token,expiresAt:renewed.expiresAt};}
     return data;
   }
   if(p.action==='listPhotos') return listPhotos_(p,a,c);
@@ -170,6 +178,19 @@ function config_() {
   need_(c.privacy_version.length>0 && c.privacy_version.length<=32,'SCHEMA_ERROR','Versió de privacitat no vàlida.');
   return c;
 }
+function rememberedAccessReady_() {
+  try { sheet_('08_DISPOSITIUS');sheet_('09_VINCULACIONS');return true; } catch(_) { return false; }
+}
+function environment_() {
+  const value=String(props_().getProperty('ENVIRONMENT')||'production').toLowerCase();
+  need_(['production','preview'].includes(value),'NOT_CONFIGURED','Entorn no vàlid.');
+  return value;
+}
+function enforceEnvironmentUser_(u) {
+  if(environment_()!=='preview')return;
+  const allowed=property_('PREVIEW_ALLOWED_PHONE_HASH');
+  need_(constantEqual_(allowed,hmac_('preview-user|'+u.telefon)),'FORBIDDEN','Compte no autoritzat en aquest entorn de proves.');
+}
 function users_(fresh) {
   const cache=requestContext_ ? null : CacheService.getScriptCache(), key='users-v3';
   if(cache&&!fresh) { const v=cache.get(key); if(v) return JSON.parse(v); }
@@ -189,8 +210,9 @@ function hmac_(s) { return Utilities.base64EncodeWebSafe(Utilities.computeHmacSh
 function constantEqual_(a,b) { if(typeof a!=='string'||typeof b!=='string') return false; let x=a.length^b.length; for(let i=0;i<Math.max(a.length,b.length);i++) x|=(a.charCodeAt(i)||0)^(b.charCodeAt(i)||0); return x===0; }
 function binding_(u,c) { return hmac_('binding|'+JSON.stringify([u.telefon,u.creat_at,String(u.sessio_epoch||0)])); }
 function userPublic_(u,c) { return {nom:String(u.nom),rol:u.rol,privacyAccepted:String(u.privacitat_version)===c.privacy_version,privacyVersion:c.privacy_version}; }
-function issueSession_(u,c) {
-  const issuedAt=Date.now(), payload={telefon:u.telefon,issuedAt,expiresAt:issuedAt+c.session_days*86400000,sessio_id:Utilities.getUuid(),binding:binding_(u,c)};
+function issueSession_(u,c,deviceId) {
+  const issuedAt=Date.now(), payload={telefon:u.telefon,issuedAt,expiresAt:issuedAt+c.session_days*86400000,sessio_id:Utilities.getUuid(),binding:binding_(u,c),
+    ...(deviceId?{device_id:deviceId}:{})};
   const body=Utilities.base64EncodeWebSafe(JSON.stringify(payload),Utilities.Charset.UTF_8).replace(/=+$/,'');
   return {token:body+'.'+hmac_(body),expiresAt:new Date(payload.expiresAt).toISOString(),session:payload};
 }
@@ -199,13 +221,110 @@ function newCode_() {
   return String(n).padStart(4,'0');
 }
 function codeHash_(telefon,inviteId,codi) { return 'hmac-v1:'+hmac_('invite|'+telefon+'|'+inviteId+'|'+codi); }
+function credentialSecret_(value) { need_(typeof value==='string'&&/^[A-Za-z0-9_-]{43,128}$/.test(value),'VALIDATION','Credencial de dispositiu no vàlida.');return value; }
+function deviceHash_(deviceId,secret) { return 'hmac-v1:'+hmac_('device|'+deviceId+'|'+secret); }
+function activeDevice_(deviceId,u) {
+  const d=unique_(rows_('08_DISPOSITIUS'),'device_id',deviceId);
+  return d&&bool_(d.actiu)&&d.telefon===u.telefon&&Number(d.sessio_epoch)===Number(u.sessio_epoch||0)?d:null;
+}
+function registerDeviceCore_(u,p) {
+  const deviceId=uuid_(p.device_id),secret=credentialSecret_(p.credential_secret),hash=deviceHash_(deviceId,secret);
+  let device=unique_(rows_('08_DISPOSITIUS'),'device_id',deviceId);
+  if(device){
+    need_(device.telefon===u.telefon&&constantEqual_(String(device.secret_hash),hash)&&Number(device.sessio_epoch)===Number(u.sessio_epoch||0)&&bool_(device.actiu),'UNAUTHORIZED','Aquest dispositiu ja no té accés.');
+    return device;
+  }
+  device={device_id:deviceId,telefon:u.telefon,secret_hash:hash,sessio_epoch:Number(u.sessio_epoch||0),actiu:true,creat_at:now_(),last_used_at:now_(),revocat_at:''};
+  put_('08_DISPOSITIUS',device);return unique_(rows_('08_DISPOSITIUS'),'device_id',deviceId);
+}
+function registerDevice_(p,a,c) {
+  const request=uuid_(p.request_id),device=registerDeviceCore_(a.user,p),old=unique_(rows_('06_REGISTRE'),'log_id',request);
+  if(old)need_(old.telefon===a.user.telefon&&old.accio==='REGISTER_DEVICE'&&old.objecte_id===device.device_id,'CONFLICT','request_id ja utilitzat.');
+  if(!old)audit_('REGISTER_DEVICE',a,c,p,'',device.device_id,null,{device_id:device.device_id},request);
+  const replacement=issueSession_(a.user,c,device.device_id);
+  return {device_id:device.device_id,remembered:true,replayed:!!old,token:replacement.token,expiresAt:replacement.expiresAt};
+}
+function redemptionClaimKey_(kind,id) { return 'pendingCredential:'+kind+':'+id; }
+function claimDeviceRedemption_(kind,id,u,p,message) {
+  let deviceId,secret;try{deviceId=uuid_(p.device_id);secret=credentialSecret_(p.credential_secret);}catch(_){fail_('INVALID_LOGIN',message);}
+  let requestId=deviceId;if(p.registration_request_id!==undefined){try{requestId=uuid_(p.registration_request_id);}catch(_){fail_('INVALID_LOGIN',message);}}
+  const key=redemptionClaimKey_(kind,id),hash=deviceHash_(deviceId,secret),raw=props_().getProperty(key);
+  if(raw){let claim;try{claim=JSON.parse(raw);}catch(_){fail_('INVALID_LOGIN',message);}need_(claim.telefon===u.telefon&&claim.device_id===deviceId&&claim.request_id===requestId&&constantEqual_(claim.device_hash,hash)&&Number(claim.sessio_epoch)===Number(u.sessio_epoch||0),'INVALID_LOGIN',message);return {...claim,key};}
+  const claim={telefon:u.telefon,device_id:deviceId,device_hash:hash,request_id:requestId,sessio_epoch:Number(u.sessio_epoch||0)};props_().setProperty(key,JSON.stringify(claim));return {...claim,key};
+}
+function hasRedemptionClaim_(kind,id) { return !!props_().getProperty(redemptionClaimKey_(kind,id)); }
+function clearRedemptionClaim_(kind,id) { props_().deleteProperty(redemptionClaimKey_(kind,id)); }
+function clearRedemptionClaimsForPhone_(phone) {
+  const all=props_().getProperties();Object.keys(all).filter(key=>key.startsWith('pendingCredential:')).forEach(key=>{let claim;try{claim=JSON.parse(all[key]);}catch(_){return;/* Keep corrupt claims for manual review. */}if(claim.telefon===phone)props_().deleteProperty(key);});
+}
+function finalizeDeviceRedemption_(kind,id,u,p,c,device,session,claim) {
+  const sheetName=kind==='invite'?'07_INVITACIONS':'09_VINCULACIONS',idField=kind==='invite'?'invite_id':'link_id',action=kind==='invite'?'INVITE_REDEEMED':'DEVICE_LINK_REDEEMED';
+  const row=unique_(rows_(sheetName),idField,id);need_(row&&row.telefon===u.telefon&&['pendent','usada'].includes(row.estat),'CONFLICT','El bescanvi pendent no es pot reconciliar.');
+  if(row.estat==='pendent'){row.estat='usada';row.usat_at=now_();put_(sheetName,row,row._row);}
+  const old=unique_(rows_('06_REGISTRE'),'log_id',claim.request_id);
+  if(old)need_(old.accio===action&&old.telefon===u.telefon&&old.objecte_id===id,'CONFLICT','La reserva de credencial ja s’ha utilitzat.');
+  else audit_(action,{user:u,session},c,p,'',id,null,{device_id:device.device_id},claim.request_id);
+  clearRedemptionClaim_(kind,id);
+}
+function reconcileDeviceRedemptions_(u,p,c,device,session,secret) {
+  const all=props_().getProperties(),hash=deviceHash_(device.device_id,secret);
+  Object.keys(all).filter(key=>key.startsWith('pendingCredential:')).forEach(key=>{let claim;try{claim=JSON.parse(all[key]);}catch(_){return;}if(claim.device_id!==device.device_id||!constantEqual_(claim.device_hash,hash)||claim.telefon!==u.telefon)return;const match=key.match(/^pendingCredential:(invite|link):(.+)$/);if(match)finalizeDeviceRedemption_(match[1],match[2],u,p,c,device,session,{...claim,key});});
+}
+function resumeDevice_(p) {
+  const c=config_(),message='Aquest dispositiu ja no té accés.';
+  let deviceId,secret;try{deviceId=uuid_(p.device_id);secret=credentialSecret_(p.credential_secret);}catch(_){fail_('UNAUTHORIZED',message);}
+  const device=unique_(rows_('08_DISPOSITIUS'),'device_id',deviceId);
+  if(!device||!bool_(device.actiu)||!constantEqual_(String(device.secret_hash),deviceHash_(deviceId,secret)))fail_('UNAUTHORIZED',message);
+  const u=unique_(users_(true),'telefon',device.telefon);
+  if(!u||!bool_(u.actiu)||Number(device.sessio_epoch)!==Number(u.sessio_epoch||0))fail_('UNAUTHORIZED',message);
+  need_(!pendingUserReservation_(u.telefon),'BUSY','Hi ha una actualització pendent per a aquesta família.');
+  enforceEnvironmentUser_(u);device.last_used_at=now_();put_('08_DISPOSITIUS',device,device._row);
+  const s=issueSession_(u,c,deviceId),a={user:u,session:s.session},accepted=String(u.privacitat_version)===c.privacy_version;reconcileDeviceRedemptions_(u,p,c,device,s.session,secret);
+  return {token:s.token,expiresAt:s.expiresAt,device_id:deviceId,user:userPublic_(u,c),privacy:{version:c.privacy_version,text:APP.privacyText},
+    ...(p.include_bootstrap===true&&accepted?{bootstrap:bootstrap_(p,a,c)}:{})};
+}
+function newLinkCode_() {
+  const n=parseInt(Utilities.getUuid().replace(/-/g,'').slice(0,12),16)%100000000;
+  return String(n).padStart(8,'0');
+}
+function linkHash_(telefon,linkId,codi) { return 'hmac-v1:'+hmac_('device-link|'+telefon+'|'+linkId+'|'+codi); }
+function cancelPendingLinks_(phone) {
+  rows_('09_VINCULACIONS').filter(link=>String(link.telefon)===phone&&link.estat==='pendent').forEach(link=>{link.estat='anul·lada';put_('09_VINCULACIONS',link,link._row);});
+}
+function revokeRememberedDevices_(phone) {
+  rows_('08_DISPOSITIUS').filter(device=>String(device.telefon)===phone&&bool_(device.actiu)).forEach(device=>{device.actiu=false;device.revocat_at=now_();put_('08_DISPOSITIUS',device,device._row);});
+}
+function createDeviceLink_(p,a,c) {
+  need_(!pendingUserReservation_(a.user.telefon),'BUSY','Hi ha una actualització pendent per a aquesta família.');
+  const recent=rows_('09_VINCULACIONS').filter(link=>link.telefon===a.user.telefon&&Date.parse(link.creat_at)>Date.now()-3600000);
+  need_(recent.length<DEVICE_LINK.maxPerHour,'RATE_LIMITED','Has generat massa codis. Torna-ho a provar més tard.');
+  need_(!rows_('09_VINCULACIONS').some(link=>link.telefon===a.user.telefon&&link.estat==='pendent'&&hasRedemptionClaim_('link',link.link_id)),'BUSY','Hi ha una vinculació pendent de completar. Torna-ho a provar.');cancelPendingLinks_(a.user.telefon);
+  const id=Utilities.getUuid(),codi=newLinkCode_(),caduca=new Date(Date.now()+DEVICE_LINK.ttlMs).toISOString();
+  put_('09_VINCULACIONS',{link_id:id,telefon:a.user.telefon,codi_hash:linkHash_(a.user.telefon,id,codi),sessio_epoch:Number(a.user.sessio_epoch||0),creat_at:now_(),caduca_at:caduca,estat:'pendent',intents:0,usat_at:''});
+  audit_('DEVICE_LINK_CREATED',a,c,p,'',id,null,{caduca_at:caduca});return {link_id:id,codi,caduca_at:caduca};
+}
+function redeemDeviceLink_(p) {
+  const c=config_(),message='Telèfon o codi incorrectes, o codi caducat.',bad=()=>fail_('INVALID_LOGIN',message);
+  let phone;try{phone=phone_(p.telefon);}catch(_){bad();}
+  if(typeof p.codi!=='string'||!/^\d{8}$/.test(p.codi)||pendingUserReservation_(phone))bad();
+  const links=rows_('09_VINCULACIONS').filter(item=>item.telefon===phone).sort((a,b)=>String(b.creat_at).localeCompare(String(a.creat_at))),u=unique_(users_(true),'telefon',phone);
+  let link=links.find(item=>item.estat==='pendent');if(!link)link=links.find(item=>item.estat==='usada'&&hasRedemptionClaim_('link',item.link_id)&&constantEqual_(String(item.codi_hash),linkHash_(phone,item.link_id,p.codi)));
+  if(!u||!bool_(u.actiu)||!link||Number(link.sessio_epoch)!==Number(u.sessio_epoch||0))bad();
+  enforceEnvironmentUser_(u);
+  const claimed=hasRedemptionClaim_('link',link.link_id);
+  if(link.estat==='pendent'&&!claimed&&Date.parse(link.caduca_at)<=Date.now()){link.estat='caducada';put_('09_VINCULACIONS',link,link._row);bad();}
+  if(!constantEqual_(String(link.codi_hash),linkHash_(phone,link.link_id,p.codi))){if(claimed)bad();link.intents=Number(link.intents||0)+1;if(link.intents>=DEVICE_LINK.maxAttempts)link.estat='cremada';put_('09_VINCULACIONS',link,link._row);bad();}
+  const claim=claimDeviceRedemption_('link',link.link_id,u,p,message),device=registerDeviceCore_(u,p);
+  const s=issueSession_(u,c,device.device_id),a={user:u,session:s.session},accepted=String(u.privacitat_version)===c.privacy_version;
+  finalizeDeviceRedemption_('link',link.link_id,u,p,c,device,s.session,claim);
+  return {token:s.token,expiresAt:s.expiresAt,device_id:device.device_id,user:userPublic_(u,c),privacy:{version:c.privacy_version,text:APP.privacyText},
+    ...(p.include_bootstrap===true&&accepted?{bootstrap:bootstrap_(p,a,c)}:{})};
+}
 function createInviteCore_(n,creatPer,c) {
   need_(!pendingUserReservation_(n),'BUSY','Hi ha una actualització pendent per a aquesta família.');
   const u=unique_(users_(true),'telefon',n);
   need_(u && bool_(u.actiu),'NOT_FOUND','Usuari no trobat o inactiu.');
-  rows_('07_INVITACIONS').filter(r=>String(r.telefon)===n&&r.estat==='pendent').forEach(r=>{
-    r.estat='anul·lada';put_('07_INVITACIONS',r,r._row);
-  });
+  const pending=rows_('07_INVITACIONS').filter(r=>String(r.telefon)===n&&r.estat==='pendent');need_(!pending.some(r=>hasRedemptionClaim_('invite',r.invite_id)),'BUSY','Hi ha una activació pendent de completar. Torna-ho a provar.');pending.forEach(r=>{r.estat='anul·lada';put_('07_INVITACIONS',r,r._row);});
   const id=Utilities.getUuid(),codi=newCode_(),caduca=new Date(Date.now()+c.invite_ttl_hours*3600000).toISOString();
   put_('07_INVITACIONS',{invite_id:id,telefon:n,codi_hash:codeHash_(n,id,codi),creat_at:now_(),caduca_at:caduca,
     creat_per:creatPer,estat:'pendent',intents:0,usat_at:''});
@@ -223,10 +342,14 @@ function redeemInvite_(p) {
   let n;try{n=phone_(p.telefon);}catch(_){bad();}
   need_(typeof p.codi==='string'&&/^\d{4}$/.test(p.codi),'INVALID_LOGIN',message);
   if(pendingUserReservation_(n))bad();
-  const u=unique_(users_(true),'telefon',n),inv=rows_('07_INVITACIONS').find(r=>String(r.telefon)===n&&r.estat==='pendent');
+  const invitations=rows_('07_INVITACIONS').filter(r=>String(r.telefon)===n).sort((a,b)=>String(b.creat_at).localeCompare(String(a.creat_at))),u=unique_(users_(true),'telefon',n);
+  let inv=invitations.find(r=>r.estat==='pendent');if(!inv&&p.device_id!==undefined&&p.credential_secret!==undefined)inv=invitations.find(r=>r.estat==='usada'&&hasRedemptionClaim_('invite',r.invite_id)&&constantEqual_(String(r.codi_hash),codeHash_(n,r.invite_id,p.codi)));
   if(!u||!bool_(u.actiu)||!inv)bad();
-  if(Date.parse(inv.caduca_at)<=Date.now()){inv.estat='caducada';put_('07_INVITACIONS',inv,inv._row);bad();}
+  enforceEnvironmentUser_(u);
+  const claimed=hasRedemptionClaim_('invite',inv.invite_id);
+  if(inv.estat==='pendent'&&!claimed&&Date.parse(inv.caduca_at)<=Date.now()){inv.estat='caducada';put_('07_INVITACIONS',inv,inv._row);bad();}
   if(!constantEqual_(String(inv.codi_hash),codeHash_(n,inv.invite_id,p.codi))){
+    if(claimed)bad();
     inv.intents=Number(inv.intents||0)+1;
     if(inv.intents>=INVITE.maxAttempts){
       inv.estat='cremada';
@@ -234,10 +357,12 @@ function redeemInvite_(p) {
     }
     put_('07_INVITACIONS',inv,inv._row);bad();
   }
-  inv.estat='usada';inv.usat_at=now_();put_('07_INVITACIONS',inv,inv._row);
-  const s=issueSession_(u,c),a={user:u,session:s.session};
-  audit_('INVITE_REDEEMED',a,c,p,'',inv.invite_id,null,null);
-  return {token:s.token,expiresAt:s.expiresAt,user:userPublic_(u,c),privacy:{version:c.privacy_version,text:APP.privacyText},
+  let device=null,claim=null;
+  if(p.device_id!==undefined||p.credential_secret!==undefined){claim=claimDeviceRedemption_('invite',inv.invite_id,u,p,message);try{device=registerDeviceCore_(u,p);}catch(e){if(e.apiCode==='VALIDATION')bad();throw e;}}
+  if(!device&&inv.estat!=='usada'){inv.estat='usada';inv.usat_at=now_();put_('07_INVITACIONS',inv,inv._row);}
+  const s=issueSession_(u,c,device&&device.device_id),a={user:u,session:s.session};
+  if(device)finalizeDeviceRedemption_('invite',inv.invite_id,u,p,c,device,s.session,claim);else audit_('INVITE_REDEEMED',a,c,p,'',inv.invite_id,null,null);
+  return {token:s.token,expiresAt:s.expiresAt,...(device?{device_id:device.device_id}:{}),user:userPublic_(u,c),privacy:{version:c.privacy_version,text:APP.privacyText},
     ...(p.include_bootstrap===true&&String(u.privacitat_version)===c.privacy_version?{bootstrap:bootstrap_(p,a,c)}:{})};
 }
 function listUsers_(p,a,c) {
@@ -310,10 +435,10 @@ function saveUserLegacy_(p,a,c,n,nom,actiu) {
   const before=u?{nom:u.nom,fills:String(u.fills||''),rol:u.rol,actiu:bool_(u.actiu)}:null;
   let after;
   if(u){
-    if(bool_(u.actiu)&&!actiu){u.sessio_epoch=Number(u.sessio_epoch||0)+1;cancelPendingInvites_(n);}
+    if(bool_(u.actiu)&&!actiu){u.sessio_epoch=Number(u.sessio_epoch||0)+1;cancelPendingInvites_(n);cancelPendingLinks_(n);revokeRememberedDevices_(n);}
     u.nom=nom;u.rol=p.rol;u.actiu=actiu;put_('03_USUARIS',u,u._row);after=u;
   } else {after={telefon:n,nom,rol:p.rol,sessio_epoch:0,actiu,privacitat_version:'',privacitat_at:'',creat_at:now_(),notes:'',fills:''};put_('03_USUARIS',after);}
-  invalidateUsers_();audit_('SAVE_USER',a,c,p,'',n,before,{nom:after.nom,fills:String(after.fills||''),rol:after.rol,actiu:bool_(after.actiu)});
+  invalidateUsers_();audit_('SAVE_USER',a,c,p,'',n,before,{nom:after.nom,fills:String(after.fills||''),rol:after.rol,actiu:bool_(after.actiu)});if(before&&!actiu)clearRedemptionClaimsForPhone_(n);
   return {usuari:userAdminPublic_(after,a,c,null),legacy:true};
 }
 function pendingUserKey_(phone) { return 'pendingUser:'+hmac_('pending-user|'+phone).slice(0,32); }
@@ -322,10 +447,13 @@ function resumeUserUpdate_(p,a,c,meta) {
   if(sameUser_(current,meta.before)){put_('03_USUARIS',meta.after,meta.row);invalidateUsers_();current=rows_('03_USUARIS').find(user=>user._row===meta.row);}
   else need_(sameUser_(current,meta.after),'CONFLICT','La família ha canviat durant una actualització pendent.');
   if(meta.cancel_invitations)cancelPendingInvites_(meta.original_telefon);
+  if(meta.cancel_links)cancelPendingLinks_(meta.original_telefon);
+  if(meta.revoke_devices)revokeRememberedDevices_(meta.original_telefon);
   const logged=unique_(rows_('06_REGISTRE'),'log_id',meta.request_id);
   if(!logged)audit_('UPDATE_USER',{user:meta.actor,session:{sessio_id:meta.sessio_id}},c,{user_agent:meta.user_agent},'',meta.original_telefon,
     {telefon:meta.before.telefon,nom:meta.before.nom,fills:meta.before.fills,rol:meta.before.rol,actiu:bool_(meta.before.actiu)},
     {hash:meta.hash,telefon:meta.after.telefon,nom:meta.after.nom,fills:meta.after.fills,rol:meta.after.rol,actiu:bool_(meta.after.actiu)},meta.request_id);
+  if(meta.revoke_devices)clearRedemptionClaimsForPhone_(meta.original_telefon);
   props_().deleteProperty(pendingUserKey_(meta.original_telefon));
   const invitations=rows_('07_INVITACIONS'),last=invitations.filter(i=>String(i.telefon)===current.telefon).sort((x,y)=>String(y.creat_at).localeCompare(String(x.creat_at)))[0];
   return {usuari:userAdminPublic_(current,a,c,last),phone_changed:meta.phone_changed,requires_new_invite:meta.phone_changed,self_phone_changed:meta.self_phone_changed,replayed:!!logged};
@@ -348,13 +476,15 @@ function updateUser_(p,a,c) {
   const before=userSnapshot_(u),after={...before,telefon:next,nom,fills,rol:p.rol,actiu};
   if(phoneChanged||bool_(u.actiu)&&!actiu)after.sessio_epoch=Number(u.sessio_epoch||0)+1;
   const meta={request_id:request,hash,original_telefon:original,row:u._row,before,after,phone_changed:phoneChanged,self_phone_changed:selfPhoneChanged,
-    cancel_invitations:phoneChanged||bool_(u.actiu)&&!actiu,actor:{telefon:a.user.telefon,nom:a.user.nom,rol:a.user.rol},sessio_id:a.session.sessio_id,user_agent:typeof p.user_agent==='string'?p.user_agent.slice(0,300):''};
+    cancel_invitations:phoneChanged||bool_(u.actiu)&&!actiu,cancel_links:phoneChanged||bool_(u.actiu)&&!actiu,revoke_devices:phoneChanged||bool_(u.actiu)&&!actiu,actor:{telefon:a.user.telefon,nom:a.user.nom,rol:a.user.rol},sessio_id:a.session.sessio_id,user_agent:typeof p.user_agent==='string'?p.user_agent.slice(0,300):''};
   props_().setProperty(key,JSON.stringify(meta));return resumeUserUpdate_(p,a,c,meta);
 }
 function revokeSessions_(p,a,c) {
   role_(a,['admin']);const n=phone_(p.telefon);need_(!pendingUserReservation_(n),'BUSY','Hi ha una actualització pendent per a aquesta família.');const u=unique_(users_(true),'telefon',n);need_(u,'NOT_FOUND','Usuari no trobat.');
   const before=Number(u.sessio_epoch||0);u.sessio_epoch=before+1;put_('03_USUARIS',u,u._row);invalidateUsers_();
-  audit_('SESSIONS_REVOKED',a,c,p,'',n,{sessio_epoch:before},{sessio_epoch:u.sessio_epoch});return {ok:true};
+  cancelPendingLinks_(n);
+  revokeRememberedDevices_(n);
+  audit_('SESSIONS_REVOKED',a,c,p,'',n,{sessio_epoch:before},{sessio_epoch:u.sessio_epoch});clearRedemptionClaimsForPhone_(n);return {ok:true};
 }
 function authenticate_(token,c,fresh) {
   need_(typeof token==='string' && token.length<2048,'UNAUTHORIZED','Cal iniciar sessió.');
@@ -365,6 +495,8 @@ function authenticate_(token,c,fresh) {
   need_(!props_().getProperty('revoked:'+s.sessio_id),'UNAUTHORIZED','Sessió tancada.');
   const u=unique_(users_(fresh),'telefon',s.telefon);
   need_(u && bool_(u.actiu) && constantEqual_(s.binding,binding_(u,c)),'UNAUTHORIZED','Accés revocat.');
+  enforceEnvironmentUser_(u);
+  if(s.device_id)need_(activeDevice_(s.device_id,u),'UNAUTHORIZED','Aquest dispositiu ja no té accés.');
   return {user:u,session:s};
 }
 function privacy_(a,c) { need_(String(a.user.privacitat_version)===c.privacy_version,'PRIVACY_REQUIRED','Cal acceptar el compromís de privacitat.'); }
@@ -393,9 +525,10 @@ function acceptPrivacy_(p,a,c) {
 function logout_(p,a,c) {
   cleanupRevocations_();
   const old=requestLog_(p,a,'LOGOUT');
-  if(!old) audit_('LOGOUT',a,c,p,'',a.session.sessio_id,null,null,p.request_id);
   need_(Object.keys(props_().getProperties()).filter(k=>k.startsWith('revoked:')).length<1500,'BUSY','Massa sessions tancades. Contacta amb l’administrador.');
   props_().setProperty('revoked:'+a.session.sessio_id,String(a.session.expiresAt));
+  if(a.session.device_id){const device=activeDevice_(a.session.device_id,a.user);if(device){device.actiu=false;device.revocat_at=now_();put_('08_DISPOSITIUS',device,device._row);}}
+  if(!old) audit_('LOGOUT',a,c,p,'',a.session.sessio_id,null,null,p.request_id);
   return {loggedOut:true};
 }
 function match_(id,admin) {
@@ -420,7 +553,7 @@ function statistics_(matches,c) {
 }
 function bootstrap_(p,a,c) {
   const matches=rows_('01_PARTITS').filter(m=>bool_(m.visible));
-  return {version:APP.version,features:{player_cards:true,family_player_edit:true,family_user_edit:true,family_children:true,fresh_permissions:true},user:userPublic_(a.user,c),config:{equip_nom:c.equip_nom,temporada:c.temporada,timezone:c.timezone,
+  const remembered=rememberedAccessReady_();return {version:APP.version,features:{player_cards:true,family_player_edit:true,family_user_edit:true,family_children:true,fresh_permissions:true,remembered_devices:remembered,device_linking:remembered},user:userPublic_(a.user,c),config:{equip_nom:c.equip_nom,temporada:c.temporada,timezone:c.timezone,
     app_nom:c.app_nom,color_primari:c.color_primari,privacy_version:c.privacy_version,cronica_max_chars:c.cronica_max_chars,
     upload_max_bytes:c.upload_max_bytes,image_max_dimension:c.image_max_dimension,thumbnail_max_dimension:c.thumbnail_max_dimension,
     thumbnail_max_bytes:APP.thumbLimit,portrait_max_bytes:APP.portraitLimit,portrait_max_dimension:APP.portraitDimension},partits:matches.map(matchPublic_),estadistiques:statistics_(matches,c),
@@ -446,7 +579,7 @@ function upgradeUserColumns_(s) {
   s.getRange(1,full.length).setValue('fills').setBackground('#14532d').setFontColor('#ffffff').setFontWeight('bold');
 }
 function formatTextColumns_(s,name) {
-  const keys=name==='01_PARTITS'?['data','hora','actualitzat_at']:name==='03_USUARIS'?['telefon']:name==='07_INVITACIONS'?['telefon','creat_at','caduca_at']:[];
+  const keys=name==='01_PARTITS'?['data','hora','actualitzat_at']:name==='03_USUARIS'?['telefon']:name==='07_INVITACIONS'?['telefon','creat_at','caduca_at']:name==='08_DISPOSITIUS'?['telefon','creat_at','last_used_at','revocat_at']:name==='09_VINCULACIONS'?['telefon','creat_at','caduca_at','usat_at']:[];
   const rows=Math.max(1,s.getMaxRows()-1);
   keys.forEach(key=>s.getRange(2,SCHEMA[name].indexOf(key)+1,rows,1).setNumberFormat('@'));
 }
@@ -809,6 +942,28 @@ function recoverPendingMatchAudits() {
       }
       clearPendingMatch_(id,meta.request_id);results.push({partit_id:id,status:'audited'});
     });return results;
+  });
+}
+function installPreviewBackend(telefon,productionIds) {
+  const p=props_(),environment=String(p.getProperty('ENVIRONMENT')||'');
+  need_(productionIds&&typeof productionIds.sheet_id==='string'&&typeof productionIds.drive_root_folder_id==='string','FORBIDDEN','Falten els identificadors de producció per validar la separació.');
+  need_(!p.getProperty('SHEET_ID')||p.getProperty('SHEET_ID')!==productionIds.sheet_id,'FORBIDDEN','El Sheet seleccionat és el de producció.');
+  need_(!p.getProperty('DRIVE_ROOT_FOLDER_ID')||p.getProperty('DRIVE_ROOT_FOLDER_ID')!==productionIds.drive_root_folder_id,'FORBIDDEN','La carpeta seleccionada és la de producció.');
+  need_(environment!=='production','FORBIDDEN','No es pot convertir un backend de producció en proves.');
+  if(!environment)need_(!p.getProperty('SHEET_ID')&&!p.getProperty('DRIVE_ROOT_FOLDER_ID'),'FORBIDDEN','El projecte ja conté recursos i no es pot inicialitzar com a proves.');
+  p.setProperty('ENVIRONMENT','preview');installBackend();need_(p.getProperty('SHEET_ID')!==productionIds.sheet_id&&p.getProperty('DRIVE_ROOT_FOLDER_ID')!==productionIds.drive_root_folder_id,'FORBIDDEN','Els recursos de proves coincideixen amb producció.');
+  return locked_(()=>{
+    const c=config_(),n=phone_(telefon);p.setProperty('PREVIEW_ALLOWED_PHONE_HASH',hmac_('preview-user|'+n));
+    let u=unique_(users_(true),'telefon',n);
+    if(!u){put_('03_USUARIS',{telefon:n,nom:'David · proves',rol:'admin',sessio_epoch:0,actiu:true,privacitat_version:'',privacitat_at:'',creat_at:now_(),notes:'Entorn sintètic de proves',fills:''});invalidateUsers_();u=unique_(users_(true),'telefon',n);}
+    need_(u.rol==='admin'&&bool_(u.actiu),'CONFLICT','El compte de proves existent no és un administrador actiu.');
+    if(!unique_(rows_('01_PARTITS'),'partit_id','PROVA001'))put_('01_PARTITS',{partit_id:'PROVA001',jornada:1,data:'2026-10-24',hora:'10:30',local:c.equip_nom,visitant:'Rival sintètic',camp_nom:'Camp de proves',camp_adreca:'',camp_lat:'',camp_lng:'',estat:'pendent',gols_local:'',gols_visitant:'',cronica:'Dades completament sintètiques.',visible:true,actualitzat_at:now_(),actualitzat_per:n});
+    const image='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUSFBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCAADAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDy+iiivOPnj//Z',bytes=Utilities.base64Decode(image);
+    let player=unique_(rows_('05_JUGADORS'),'jugador_id','J-PROVA');
+    if(!player){const photoId=Utilities.getUuid(),folder=playerFolder_(true),file=folder.createFile(Utilities.newBlob(bytes,'image/jpeg','J-PROVA_'+photoId+'.jpg'));assertPrivate_(file);player={jugador_id:'J-PROVA',nom:'Jugador sintètic',dorsal:10,no_mostrar:false,actiu:true,posicio:'Migcampista',foto_id:photoId,foto_drive_file_id:file.getId(),actualitzat_at:now_(),ultima_peticio:'',ultima_peticio_hash:''};put_('05_JUGADORS',player);}
+    if(!unique_(rows_('04_FOTOS'),'foto_id','00000000-0000-4000-8000-000000000901')){const folder=matchFolder_('PROVA001',true),photoId='00000000-0000-4000-8000-000000000901',main=folder.createFile(Utilities.newBlob(bytes,'image/jpeg',photoId+'_photo.jpg')),thumb=folder.createFile(Utilities.newBlob(bytes,'image/jpeg',photoId+'_thumb.jpg'));assertPrivate_(main);assertPrivate_(thumb);put_('04_FOTOS',{foto_id:photoId,partit_id:'PROVA001',drive_file_id:main.getId(),thumb_file_id:thumb.getId(),mime_type:'image/jpeg',bytes:bytes.length,amplada:2,alcada:3,jugadors_ids:'',peu:'Fotografia sintètica de proves',no_mostrar:false,motiu_ocultacio:'',pujat_at:now_(),pujat_per_tel:n,pujat_per_nom:'David · proves',eliminat:false,eliminat_at:'',eliminat_per:''});}
+    const invite=createInviteCore_(n,'PREVIEW_SETUP',c);p.setProperty('APP_VERSION',APP.version);
+    return {environment:'preview',version:APP.version,sheet_id:p.getProperty('SHEET_ID'),drive_root_folder_id:p.getProperty('DRIVE_ROOT_FOLDER_ID'),telefon:n,codi:invite.codi,caduca_at:invite.caduca_at};
   });
 }
 function recoverPendingUserUpdates() {

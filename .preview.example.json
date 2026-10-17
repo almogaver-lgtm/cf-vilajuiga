@@ -1,0 +1,16 @@
+{
+  "environment": "preview",
+  "github_owner": "almogaver-lgtm",
+  "github_repo": "cf-vilajuiga-proves",
+  "api_url": "https://script.google.com/macros/s/ID_DESPLEGAMENT_DE_PROVES/exec",
+  "script_id": "ID_PROJECTE_APPS_SCRIPT_DE_PROVES",
+  "deployment_id": "ID_DESPLEGAMENT_DE_PROVES",
+  "sheet_id": "ID_SHEET_PRIVAT_DE_PROVES",
+  "drive_root_folder_id": "ID_CARPETA_PRIVADA_DE_PROVES",
+  "production_ids": {
+    "script_id": "ID_PROJECTE_APPS_SCRIPT_PRODUCCIO",
+    "deployment_id": "ID_DESPLEGAMENT_PRODUCCIO",
+    "sheet_id": "ID_SHEET_PRODUCCIO",
+    "drive_root_folder_id": "ID_CARPETA_DRIVE_PRODUCCIO"
+  }
+}

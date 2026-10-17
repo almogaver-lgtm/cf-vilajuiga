@@ -1,6 +1,6 @@
 # CF Vilajuïga · Guia de l’app
 
-PWA en català, frontend `4.1.1` i backend Apps Script `3.1.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
+PWA en català, frontend `4.2.0` i backend Apps Script `3.2.0`. El repositori només conté codi, recursos públics i dades sintètiques de prova. Els telèfons, sessions, fotografies i registres reals viuen al Sheet, Script Properties i Drive privat.
 
 ## Funcions
 
@@ -15,7 +15,9 @@ PWA en català, frontend `4.1.1` i backend Apps Script `3.1.0`. El repositori no
 
 ## Accés i permisos
 
-L’accés es fa amb telèfon i un codi de quatre xifres creat per l’administrador. El codi:
+L’activació inicial es fa amb telèfon i un codi de quatre xifres creat per l’administrador. Després, cada navegador conserva una credencial aleatòria pròpia, sense caducitat de calendari, que renova silenciosament les sessions tècniques. El servidor només en desa el verificador. Un dispositiu connectat pot generar un codi de vuit xifres, vàlid durant deu minuts i d’un sol ús, per connectar un altre navegador sense una invitació nova.
+
+El codi inicial:
 
 - és d’un sol ús;
 - caduca al cap de 48 hores per defecte;
@@ -34,21 +36,19 @@ Rols:
 | Crear cromos i gestionar cromos ocults | — | — | Sí |
 | Gestionar fotos ocultes i famílies | — | — | Sí |
 
-El servidor torna a comprovar usuari, rol, activació i privacitat a cada petició. Quan queden menys de set dies, la sessió es renova automàticament. Revocar sessions incrementa `sessio_epoch` i invalida tots els dispositius d’aquell usuari.
+El servidor torna a comprovar usuari, rol, activació, dispositiu i privacitat a cada petició. Quan queden menys de set dies, la sessió tècnica es renova automàticament. «Tancar sessió» revoca només aquell dispositiu; revocar totes les sessions, desactivar o canviar el telèfon incrementa `sessio_epoch` i invalida tots els dispositius i codis de vinculació de l’usuari.
 
-## Desplegament 4.1.1 / backend 3.1.0
+## Versió de proves 4.2.0 / backend 3.2.0
 
-Aquesta versió permet a família, editor i administració editar qualsevol cromo visible, incorpora gir fi del retrat i afegeix l’edició administrativa de famílies. El frontend `4.1.1` mostra una vegada un avís local a famílies i editors per donar a conèixer l’edició de cromos. Només administració pot crear cromos o editar-ne d’ocults. Les imatges es processen només en memòria i l’editor local manté els límits de 1200 px i 400 KiB.
+Aquesta versió afegeix accés recordat indefinidament fins a revocació explícita, vinculació mòbil–PC, reacceptació de privacitat sense invitació i un circuit de proves completament separat. Els tokens tècnics continuen sent temporals; no es converteixen en tokens permanents.
 
 1. Executa les quatre suites locals i revisa el diff.
-2. Fes una còpia de seguretat del Sheet i executa `installBackend()` perquè afegeixi idempotentment la columna final `fills` a `03_USUARIS`.
-3. Publica primer el backend `3.1.0` com una nova versió del desplegament Apps Script existent, conservant la mateixa URL `/exec`.
-4. Comprova que `health` retorna `version: "3.1.0"` i `configured: true`, sense consultar dades privades.
-5. Prova invitació, consentiment, renovació, logout, edició de famílies i cromos en un entorn de validació.
-6. Publica el frontend `4.1.1` a GitHub Pages només després de l’aprovació final.
-7. Recarrega les pestanyes ja obertes i torna a obrir l’app instal·lada. El service worker `4.1.1` activa la cache nova, però no substitueix automàticament el JavaScript que una pestanya ja està executant.
+2. Abans del primer `npm run preview:setup`, defineix només per a aquella ordre `CFV_PREVIEW_PHONE`, `CFV_PRODUCTION_SCRIPT_ID`, `CFV_PRODUCTION_SHEET_ID` i `CFV_PRODUCTION_DRIVE_ROOT_ID`. L’identificador del desplegament productiu es deriva de l’URL configurada.
+3. Executa `npm run preview:setup` una sola vegada amb GitHub CLI i clasp autenticats. Crea o reutilitza `cf-vilajuiga-proves`, un projecte Apps Script separat, un Sheet privat i una carpeta privada amb fixtures sintètiques. Abans de cada `clasp push` comprova el projecte, el desplegament i la separació dels identificadors productius.
+4. Executa `npm run preview:publish` per validar, publicar backend i frontend de proves i verificar l’enllaç.
+5. Executa `npm run release:prepare` només després de l’acceptació; prepara la promoció del mateix commit però no toca producció.
 
-El frontend `4.1.1` comprova `features.family_player_edit`, `features.family_user_edit` i `features.family_children` abans d’oferir els controls nous. Amb el backend `3.0.1`, manté alta, invitacions, revocació i activació/desactivació de famílies, però oculta l’edició i el camp `fills` perquè el servidor antic no els pot conservar. El backend `3.1.0` manté temporalment el contracte `saveUser` de la versió 4.0.4 i preserva `fills` quan rep una d’aquestes operacions antigues.
+El frontend comprova `features.remembered_devices` i `features.device_linking`. Amb un backend anterior manté el flux temporal existent i no mostra la vinculació; les sessions antigues vàlides es migren una sola vegada quan el backend 3.2.0 ja està disponible.
 
 ## Administració
 

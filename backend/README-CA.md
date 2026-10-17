@@ -1,4 +1,4 @@
-# CF Vilajuïga · Backend Apps Script 3.1.0
+# CF Vilajuïga · Backend Apps Script 3.2.0
 
 Backend privat basat en Google Apps Script, Sheets i Drive. No hi ha secrets, telèfons reals ni fotografies al repositori.
 
@@ -7,12 +7,12 @@ Backend privat basat en Google Apps Script, Sheets i Drive. No hi ha secrets, te
 1. Fes una còpia del Sheet real.
 2. Copia `Code.gs` i `appsscript.json` al projecte Apps Script existent.
 3. Executa `installBackend()`.
-4. Verifica que existeixen les set pestanyes `01_PARTITS` a `07_INVITACIONS`.
+4. Verifica que existeixen les nou pestanyes `01_PARTITS` a `09_VINCULACIONS`.
 5. Comprova que el Sheet i la carpeta de fotos continuen amb accés restringit.
 6. Executa `adminInvite(telefon)` des d’una funció temporal per obtenir la primera invitació.
 7. Publica una **Nova versió** del desplegament existent, amb la mateixa URL `/exec`.
 
-`installBackend()` és repetible. Migra la columna `codi` de `03_USUARIS` a `sessio_epoch`, afegeix `fills` al final de la pestanya sense moure les dades existents, esborra els codis permanents antics, crea `07_INVITACIONS`, elimina `login_mode` i afegeix `invite_ttl_hours=48`.
+`installBackend()` és repetible. Conserva les migracions anteriors i crea `08_DISPOSITIUS` i `09_VINCULACIONS` sense alterar usuaris, secrets o dades existents.
 
 ## Pestanyes
 
@@ -23,6 +23,8 @@ Backend privat basat en Google Apps Script, Sheets i Drive. No hi ha secrets, te
 - `05_JUGADORS`: cromos, restriccions i retrats.
 - `06_REGISTRE`: auditoria d’accessos i escriptures.
 - `07_INVITACIONS`: invitacions hashejades, caducitat, intents i estat.
+- `08_DISPOSITIUS`: verificadors de credencials recordades, generació de revocació i estat; mai secrets en clar.
+- `09_VINCULACIONS`: codis temporals hashejats per connectar navegadors.
 
 ## API
 
@@ -31,6 +33,8 @@ Totes les accions privades són `POST` amb JSON com a `text/plain;charset=utf-8`
 Accions públiques:
 
 - `redeemInvite`: bescanvia telèfon i codi d’un sol ús.
+- `resumeDevice`: obté una sessió tècnica nova des d’una credencial recordada vigent.
+- `redeemDeviceLink`: connecta un navegador amb un codi temporal d’un altre dispositiu.
 
 Lectures autenticades:
 
@@ -39,7 +43,7 @@ Lectures autenticades:
 
 Escriptures autenticades:
 
-- `acceptPrivacy`, `logout`, `updateResult`, `updateChronicle`.
+- `acceptPrivacy`, `logout`, `registerDevice`, `createDeviceLink`, `updateResult`, `updateChronicle`.
 - `uploadPhoto`, `downloadPhoto`, `hidePhoto`, `showPhoto`, `deletePhoto`.
 - `savePlayer`, `createInvite`, `saveUser`, `updateUser`, `revokeSessions`.
 
@@ -65,6 +69,9 @@ Les lectures `bootstrap`, `getPlayerPortraits`, `listPhotos` i `getThumbnails` a
 - `SESSION_SECRET` signa invitacions i tokens; mai surt de Script Properties.
 - `sessio_epoch` invalida totes les sessions d’un usuari sense afectar els altres.
 - `bootstrap` renova la sessió quan queden menys de set dies.
+- Les credencials de dispositiu no caduquen per calendari, però són revocables i lligades a `sessio_epoch`.
+- Els codis de vinculació són de vuit xifres, duren deu minuts, tenen cinc intents i són d’un sol ús.
+- El logout individual revoca el dispositiu actual; la revocació global, desactivació i canvi de telèfon invaliden tots els dispositius i vinculacions.
 
 ## Fotografies
 
@@ -79,6 +86,7 @@ Les lectures `bootstrap`, `getPlayerPortraits`, `listPhotos` i `getThumbnails` a
 ## Eines de propietari
 
 - `addUser(telefon, nom, rol)`
+- `installPreviewBackend(telefon, productionIds)`, invocada temporalment per `preview:setup` exclusivament en un projecte nou; rebutja explícitament els identificadors de Sheet i Drive de producció.
 - `adminInvite(telefon)`
 - `invalidateUserCache()`
 - `recoverPendingMatchAudits()`
