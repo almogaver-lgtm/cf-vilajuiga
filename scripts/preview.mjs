@@ -53,6 +53,9 @@ async function assertCleanCommit(){if(git('status','--porcelain'))throw new Erro
 function clasp(args,cwd){return process.platform==='win32'
   ?command(process.env.ComSpec||'cmd.exe',['/d','/s','/c','npx.cmd','--yes','@google/clasp',...args],{cwd})
   :command('npx',['--yes','@google/clasp',...args],{cwd});}
+function npm(args,cwd=ROOT){return process.platform==='win32'
+  ?command(process.env.ComSpec||'cmd.exe',['/d','/s','/c','npm.cmd',...args],{cwd})
+  :command('npm',args,{cwd});}
 function requireProductionIds(config){for(const key of ['script_id','deployment_id','sheet_id','drive_root_folder_id'])if(typeof config.production_ids?.[key]!=='string'||config.production_ids[key].length<8)throw new Error(`Falta production_ids.${key}; s’atura abans de modificar Apps Script.`);}
 export function assertPreviewScriptTarget(config,backend){
   requireProductionIds(config);let actual;try{actual=JSON.parse(readFileSync(join(backend,'.clasp.json'),'utf8')).scriptId;}catch{throw new Error('Falta una identitat .clasp.json de proves vàlida.');}
@@ -92,7 +95,7 @@ async function setup(){
   if(command('gh',['repo','view',`${config.github_owner}/${config.github_repo}`],{allowFailure:true}).status!==0)command('gh',['repo','create',`${config.github_owner}/${config.github_repo}`,'--public','--description','Desplegament sintètic de proves del CF Vilajuïga','--disable-issues']);
   let backend=join(LOCAL,'backend');await mkdir(backend,{recursive:true});const hasClasp=await exists(join(backend,'.clasp.json'));if(!hasClasp){if(config.script_id)throw new Error('La configuració indica un projecte però falta .clasp.json; no se’n crearà ni adoptarà cap altre.');await rm(backend,{recursive:true,force:true});await mkdir(backend,{recursive:true});clasp(['create','--title','CF Vilajuïga · PROVES','--type','standalone'],backend);config.script_id=JSON.parse(await readFile(join(backend,'.clasp.json'),'utf8')).scriptId;}assertPreviewScriptTarget(config,backend);await writeFile(CONFIG_FILE,JSON.stringify(config,null,2));backend=await syncBackendDir();assertPreviewScriptTarget(config,backend);const data=await installPreviewOverTemporaryEndpoint(backend,config,phone);Object.assign(config,{sheet_id:data.sheet_id,drive_root_folder_id:data.drive_root_folder_id});validatePreviewConfig(config,productionApi);await writeFile(CONFIG_FILE,JSON.stringify(config,null,2));console.log(JSON.stringify({ok:true,config:CONFIG_FILE,invite_code:data.codi,expires_at:data.caduca_at},null,2));
 }
-async function runValidation(){for(const args of [['test'],['run','test:backend'],['run','test:performance'],['run','test:browser']])command('npm',args);command('git',['diff','--check']);}
+async function runValidation(){for(const args of [['test'],['run','test:backend'],['run','test:performance'],['run','test:browser']])npm(args);command('git',['diff','--check']);}
 async function publish(){
   await assertDevelop();const commit=await assertCleanCommit(),config=validatePreviewConfig(await loadConfig(),await sourceProductionApi());await runValidation();const backend=await syncBackendDir();previewClasp(config,['push','--force'],backend);const version=previewClasp(config,['version',`Preview ${commit.slice(0,12)}`],backend).stdout.match(/\d+/)?.[0];if(!version)throw new Error('No s’ha pogut crear la versió del backend de proves.');previewClasp(config,deploymentCommand(config.deployment_id,version,`Preview ${commit.slice(0,12)}`),backend);
   const health=await fetch(config.api_url+'?action=health').then(response=>response.json());if(!health.ok||health.data?.environment!=='preview'||health.data?.version!=='3.2.0'||health.data?.configured!==true)throw new Error('El backend desplegat no és el backend de proves 3.2.0 configurat.');
