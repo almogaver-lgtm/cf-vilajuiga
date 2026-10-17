@@ -16,7 +16,7 @@ export const FRONTEND_FILES=Object.freeze([
 
 function command(bin,args,{cwd=ROOT,allowFailure=false}={}){
   const result=spawnSync(bin,args,{cwd,encoding:'utf8',stdio:['inherit','pipe','pipe'],shell:false});
-  if(result.status!==0&&!allowFailure)throw new Error(`${bin} ${args.join(' ')} ha fallat: ${(result.stderr||result.stdout||'').trim()}`);
+  if(result.status!==0&&!allowFailure)throw new Error(`${bin} ${args.join(' ')} ha fallat: ${(result.stderr||result.stdout||result.error?.message||'').trim()}`);
   return result;
 }
 const git=(...args)=>command('git',args).stdout.trim();
@@ -50,7 +50,7 @@ export async function buildPreviewSite({source=ROOT,destination,config,commit,ve
 async function loadConfig(){if(!await exists(CONFIG_FILE))throw new Error('Falta .preview/config.json. Executa npm run preview:setup.');return JSON.parse(await readFile(CONFIG_FILE,'utf8'));}
 async function assertDevelop(){if(git('branch','--show-current')!=='develop')throw new Error('Les proves només es publiquen des de develop.');}
 async function assertCleanCommit(){if(git('status','--porcelain'))throw new Error('Cal provar i commitejar exactament el codi abans de publicar-lo a proves.');return git('rev-parse','HEAD');}
-function clasp(args,cwd){return command('npx',['--yes','@google/clasp',...args],{cwd});}
+function clasp(args,cwd){return command(process.platform==='win32'?'npx.cmd':'npx',['--yes','@google/clasp',...args],{cwd});}
 function requireProductionIds(config){for(const key of ['script_id','deployment_id','sheet_id','drive_root_folder_id'])if(typeof config.production_ids?.[key]!=='string'||config.production_ids[key].length<8)throw new Error(`Falta production_ids.${key}; s’atura abans de modificar Apps Script.`);}
 export function assertPreviewScriptTarget(config,backend){
   requireProductionIds(config);let actual;try{actual=JSON.parse(readFileSync(join(backend,'.clasp.json'),'utf8')).scriptId;}catch{throw new Error('Falta una identitat .clasp.json de proves vàlida.');}
